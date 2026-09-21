@@ -111,9 +111,9 @@ export default function DashboardLayout({
       <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
         <Sidebar variant="sidebar" className="hidden md:flex">
           <SidebarHeader>
-            <div className="flex h-14 items-center gap-2 border-b px-4 lg:h-[60px] lg:px-6">
-              <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-md bg-transparent">
-                <Image src="/00.png" alt="All In One POS logo" width={72} height={72} className="h-9 w-auto object-contain" />
+            <div className="flex h-14 items-center gap-2.5 border-b px-4 lg:h-[60px] lg:px-6">
+              <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-white p-0.5 shadow-sm ring-1 ring-border/70">
+                <Image src="/00.png" alt="All In One POS logo" width={72} height={72} className="h-full w-full rounded-lg object-contain object-center" />
               </div>
               <span className="text-lg font-semibold text-primary">All In One POS</span>
             </div>

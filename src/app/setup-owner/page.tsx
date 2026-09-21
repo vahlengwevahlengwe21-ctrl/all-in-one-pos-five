@@ -36,8 +36,8 @@ export default function SetupOwnerPage() {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-md space-y-6">
         <div className="flex items-center justify-center gap-3">
-          <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-xl bg-transparent">
-            <Image src="/00.png" alt="All In One POS logo" width={120} height={120} className="h-14 w-auto object-contain" />
+          <div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-white/5 p-1 shadow-sm ring-1 ring-border/70">
+            <Image src="/00.png" alt="All In One POS logo" width={128} height={128} className="h-full w-full rounded-xl object-cover object-center" />
           </div>
           <span className="text-2xl font-semibold tracking-tight">All In One POS</span>
         </div>

@@ -1,8 +1,8 @@
 'use client';
 
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
-import { Package2 } from 'lucide-react';
 import {
   Sidebar,
   SidebarContent,
@@ -92,7 +92,9 @@ export default function DashboardLayout({
     return (
       <div className="flex min-h-screen items-center justify-center bg-background p-4">
         <div className="w-full max-w-md space-y-4 rounded-lg border bg-card p-6 text-center shadow-sm">
-          <Package2 className="mx-auto h-10 w-10 text-primary" />
+          <div className="flex justify-center">
+            <Image src="/00.png" alt="All In One POS logo" width={100} height={100} className="h-16 w-auto object-contain" />
+          </div>
           <h1 className="text-xl font-semibold">Open All In One POS Desktop</h1>
           <p className="text-sm text-muted-foreground">Shop owners, managers, and salespeople must use the registered Electron computer for this shop.</p>
           <p className="text-sm text-muted-foreground">The super administrator uses the web dashboard to manage shops and terminals.</p>
@@ -106,8 +108,10 @@ export default function DashboardLayout({
       <div className="grid min-h-screen w-full md:grid-cols-[220px_1fr] lg:grid-cols-[280px_1fr]">
         <Sidebar variant="sidebar" className="hidden md:flex">
           <SidebarHeader>
-            <div className="flex h-14 items-center gap-2 border-b px-4 lg:h-[60px] lg:px-6">
-              <Package2 className="h-6 w-6 text-primary" />
+            <div className="flex h-14 items-center gap-2.5 border-b px-4 lg:h-[60px] lg:px-6">
+              <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-white p-0.5 shadow-sm ring-1 ring-border/70">
+                <Image src="/00.png" alt="All In One POS logo" width={72} height={72} className="h-full w-full rounded-lg object-contain object-center" />
+              </div>
               <span className="text-lg font-semibold text-primary">All In One POS</span>
             </div>
           </SidebarHeader>

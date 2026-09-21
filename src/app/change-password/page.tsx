@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/firebase';
@@ -9,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Package2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 
 export default function ChangePasswordPage() {
   const auth = useAuth();
@@ -41,7 +42,9 @@ export default function ChangePasswordPage() {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
-          <Package2 className="mx-auto h-8 w-8 text-primary" />
+          <div className="mx-auto flex h-14 w-14 items-center justify-center overflow-hidden rounded-2xl bg-white/5 p-1 shadow-sm ring-1 ring-border/70">
+            <Image src="/00.png" alt="All In One POS logo" width={120} height={120} className="h-full w-full rounded-xl object-cover object-center" />
+          </div>
           <CardTitle>Set your permanent password</CardTitle>
           <CardDescription>This temporary password can no longer be used after you continue.</CardDescription>
         </CardHeader>

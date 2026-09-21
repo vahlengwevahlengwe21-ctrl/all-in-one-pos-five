@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { createShopOwnerAction } from '@/app/actions/shop-actions';
@@ -7,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Loader2, Package2 } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 export default function SetupOwnerPage() {
@@ -34,7 +35,12 @@ export default function SetupOwnerPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <div className="w-full max-w-md space-y-6">
-        <div className="flex items-center justify-center gap-2"><Package2 className="h-8 w-8 text-primary" /><span className="text-2xl font-semibold">All In One POS</span></div>
+        <div className="flex items-center justify-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl bg-white/5 p-1 shadow-sm ring-1 ring-border/70">
+            <Image src="/00.png" alt="All In One POS logo" width={120} height={120} className="h-full w-full rounded-xl object-cover object-center" />
+          </div>
+          <span className="text-2xl font-semibold">All In One POS</span>
+        </div>
         <Card>
           <CardHeader><CardTitle>Set up {shopName}</CardTitle><CardDescription>Create the first administrator account for this shop.</CardDescription></CardHeader>
           <CardContent>
