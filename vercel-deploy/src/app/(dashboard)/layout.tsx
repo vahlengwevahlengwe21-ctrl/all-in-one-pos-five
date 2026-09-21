@@ -35,7 +35,9 @@ export default function DashboardLayout({
   const adminOnlyRoute = ['/dashboard', '/products', '/cash-up', '/stock-count', '/reports', '/sales', '/settings']
     .some((route) => pathname === route || pathname.startsWith(`${route}/`));
   const isSalesUser = userProfile?.role === 'sales';
+  const isShopOwner = userProfile?.role === 'shop owner';
   const isSuperAdmin = userProfile?.role === 'super administrator';
+  const canUseWebDashboard = isSuperAdmin || isShopOwner;
   const isPosRoute = pathname === '/pos' || pathname.startsWith('/pos/');
 
   useEffect(() => {
@@ -88,7 +90,7 @@ export default function DashboardLayout({
     );
   }
 
-  if (!isElectron && !isSuperAdmin) {
+  if (!isElectron && !canUseWebDashboard) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background p-4">
         <div className="w-full max-w-md space-y-4 rounded-lg border bg-card p-6 text-center shadow-sm">
@@ -96,8 +98,8 @@ export default function DashboardLayout({
             <Image src="/00.png" alt="All In One POS logo" width={100} height={100} className="h-16 w-auto object-contain" />
           </div>
           <h1 className="text-xl font-semibold">Open All In One POS Desktop</h1>
-          <p className="text-sm text-muted-foreground">Shop owners, managers, and salespeople must use the registered Electron computer for this shop.</p>
-          <p className="text-sm text-muted-foreground">The super administrator uses the web dashboard to manage shops and terminals.</p>
+          <p className="text-sm text-muted-foreground">Salespeople must use the registered Electron computer for this shop.</p>
+          <p className="text-sm text-muted-foreground">Shop owners and the super administrator can use the live web dashboard.</p>
         </div>
       </div>
     );
