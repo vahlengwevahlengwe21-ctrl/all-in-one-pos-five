@@ -1,10 +1,10 @@
 'use client';
 
 import { useMemo } from 'react';
-import { collection } from 'firebase/firestore';
-import { useCollection, useDoc, useFirestore, useUser } from '@/firebase';
-import { useMemoFirebase } from '@/firebase/provider';
-import { doc, query, where } from 'firebase/firestore';
+import { collection } from '@/lib/mysql-client';
+import { useCollection, useDoc, useMysql, useUser } from '@/auth';
+import { useMemoMysql } from '@/auth/provider';
+import { doc, query, where } from '@/lib/mysql-client';
 import type { Layaway, Sale, UserProfile } from '@/lib/types';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { useSelectedShopContext } from '@/contexts/shop-context';
@@ -12,20 +12,20 @@ import { useSelectedShopContext } from '@/contexts/shop-context';
 const money = (value: number) => `R${value.toFixed(2)}`;
 
 export function AdvancedPosSummary() {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { user } = useUser();
   const { selectedShopId, isSuperAdmin } = useSelectedShopContext();
-  const profileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const profileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: profile } = useDoc<UserProfile>(profileRef);
   const scopedShopId = isSuperAdmin ? selectedShopId || profile?.shopId : profile?.shopId;
-  const salesQuery = useMemoFirebase(() => {
-    if (!firestore || !profile || !scopedShopId) return null;
-    return query(collection(firestore, 'sales'), where('shopId', '==', scopedShopId));
-  }, [firestore, profile, scopedShopId]);
-  const layawaysQuery = useMemoFirebase(() => {
-    if (!firestore || !profile || !scopedShopId) return null;
-    return query(collection(firestore, 'layaways'), where('shopId', '==', scopedShopId));
-  }, [firestore, profile, scopedShopId]);
+  const salesQuery = useMemoMysql(() => {
+    if (!mysql || !profile || !scopedShopId) return null;
+    return query(collection(mysql, 'sales'), where('shopId', '==', scopedShopId));
+  }, [mysql, profile, scopedShopId]);
+  const layawaysQuery = useMemoMysql(() => {
+    if (!mysql || !profile || !scopedShopId) return null;
+    return query(collection(mysql, 'layaways'), where('shopId', '==', scopedShopId));
+  }, [mysql, profile, scopedShopId]);
   const { data: sales, isLoading: salesLoading } = useCollection<Sale>(salesQuery);
   const { data: layaways, isLoading: layawaysLoading } = useCollection<Layaway>(layawaysQuery);
 

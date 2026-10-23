@@ -1,9 +1,9 @@
 'use client';
 
 import { createContext, useContext, useEffect, useMemo, useState } from 'react';
-import { doc } from 'firebase/firestore';
-import { useDoc, useFirestore, useUser } from '@/firebase';
-import { useMemoFirebase } from '@/firebase/provider';
+import { doc } from '@/lib/mysql-client';
+import { useDoc, useMysql, useUser } from '@/auth';
+import { useMemoMysql } from '@/auth/provider';
 import { listShopsAction } from '@/app/actions/shop-actions';
 import type { Shop, UserProfile } from '@/lib/types';
 
@@ -21,10 +21,10 @@ const ShopContext = createContext<ShopContextValue | undefined>(undefined);
 
 export function ShopProvider({ children }: { children: React.ReactNode }) {
   const { user } = useUser();
-  const firestore = useFirestore();
-  const profileRef = useMemoFirebase(
-    () => (firestore && user ? doc(firestore, 'users', user.uid) : null),
-    [firestore, user]
+  const mysql = useMysql();
+  const profileRef = useMemoMysql(
+    () => (mysql && user ? doc(mysql, 'users', user.uid) : null),
+    [mysql, user]
   );
   const { data: profile } = useDoc<UserProfile>(profileRef);
   const isSuperAdmin = profile?.role === 'super administrator';
@@ -46,7 +46,7 @@ export function ShopProvider({ children }: { children: React.ReactNode }) {
       setIsLoading(true);
 
       try {
-        const result = await listShopsAction({ idToken: await user.getIdToken() });
+        const result = await listShopsAction({ sessionProof: await user.getSessionProof() });
         if (isCancelled || !result.success) {
           return;
         }

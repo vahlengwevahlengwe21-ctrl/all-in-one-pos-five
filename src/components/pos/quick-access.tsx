@@ -1,8 +1,8 @@
 'use client';
 
-import { useFirestore, useCollection, useAuth } from '@/firebase';
-import { collection, query } from 'firebase/firestore';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useMysql, useCollection, useAuth } from '@/auth';
+import { collection, query } from '@/lib/mysql-client';
+import { useMemoMysql } from '@/auth/provider';
 import type { Favorite } from '@/lib/types';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -18,17 +18,17 @@ interface QuickAccessProps {
 }
 
 export function QuickAccess({ onAddToCart }: QuickAccessProps) {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const auth = useAuth();
   const { toast } = useToast();
   const [removing, setRemoving] = useState<string | null>(null);
 
-  const favoritesQuery = useMemoFirebase(
+  const favoritesQuery = useMemoMysql(
     () =>
-      firestore && auth?.currentUser
-        ? query(collection(firestore, `users/${auth.currentUser.uid}/favorites`))
+      mysql && auth?.currentUser
+        ? query(collection(mysql, `users/${auth.currentUser.uid}/favorites`))
         : null,
-    [firestore, auth?.currentUser]
+    [mysql, auth?.currentUser]
   );
 
   const { data: favorites, isLoading } = useCollection<Favorite>(favoritesQuery);
@@ -37,8 +37,8 @@ export function QuickAccess({ onAddToCart }: QuickAccessProps) {
     if (!auth?.currentUser) return;
     setRemoving(productId);
     try {
-      const idToken = await auth.currentUser.getIdToken();
-      const result = await removeFavoriteAction({ idToken, productId });
+      const sessionProof = await auth.currentUser.getSessionProof();
+      const result = await removeFavoriteAction({ sessionProof, productId });
       if (!result.success) {
         toast({ variant: 'destructive', title: 'Error', description: result.error });
       }

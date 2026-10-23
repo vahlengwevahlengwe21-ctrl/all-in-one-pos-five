@@ -1,32 +1,32 @@
 'use server';
 
 import { createHash, randomBytes } from 'crypto';
-import { initializeFirebaseAdmin } from '@/firebase/server';
-import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { initializeMysqlServer } from '@/lib/mysql-auth-server';
+import { FieldValue, Timestamp, type Query } from '@/lib/mysql-store';
 import { writeAuditEvent } from '@/lib/audit';
 
-async function requireSuperAdmin(idToken: string) {
-  const { auth, firestore } = initializeFirebaseAdmin();
-  if (!idToken) throw new Error('Authentication token is missing.');
-  const decoded = await auth.verifyIdToken(idToken);
-  const role = await firestore.collection('roles_super_admin').doc(decoded.uid).get();
+async function requireSuperAdmin(sessionProof: string) {
+  const { auth, mysql } = initializeMysqlServer();
+  if (!sessionProof) throw new Error('Authentication token is missing.');
+  const decoded = await auth.verifySessionProof(sessionProof);
+  const role = await mysql.collection('roles_super_admin').doc(decoded.uid).get();
   if (!role.exists) {
-    const profile = await firestore.collection('users').doc(decoded.uid).get();
+    const profile = await mysql.collection('users').doc(decoded.uid).get();
     if (profile.data()?.role !== 'super administrator') {
       throw new Error('Only super administrators can manage shops.');
     }
   }
-  return { auth, firestore, uid: decoded.uid };
+  return { auth, mysql, uid: decoded.uid };
 }
 
-async function requireShopAccess(idToken: string, shopId: string) {
-  const { auth, firestore } = initializeFirebaseAdmin();
-  if (!idToken) throw new Error('Authentication token is missing.');
-  const decoded = await auth.verifyIdToken(idToken);
-  const profile = await firestore.collection('users').doc(decoded.uid).get();
-  const isSuperAdmin = profile.data()?.role === 'super administrator' || (await firestore.collection('roles_super_admin').doc(decoded.uid).get()).exists;
+async function requireShopAccess(sessionProof: string, shopId: string) {
+  const { auth, mysql } = initializeMysqlServer();
+  if (!sessionProof) throw new Error('Authentication token is missing.');
+  const decoded = await auth.verifySessionProof(sessionProof);
+  const profile = await mysql.collection('users').doc(decoded.uid).get();
+  const isSuperAdmin = profile.data()?.role === 'super administrator' || (await mysql.collection('roles_super_admin').doc(decoded.uid).get()).exists;
   if (!isSuperAdmin && profile.data()?.shopId !== shopId) throw new Error('You do not have access to this shop.');
-  return { firestore, role: profile.data()?.role };
+  return { mysql, role: profile.data()?.role };
 }
 
 function normalizeShopId(value: string) {
@@ -54,23 +54,23 @@ function nextBillingDate(date = new Date()) {
   return new Date(date.getFullYear(), date.getMonth() + 1, 1);
 }
 
-function getBillingExpiry(shop: FirebaseFirestore.DocumentData) {
+function getBillingExpiry(shop: Record<string, any>) {
   const explicitExpiry = shop.billingExpiresAt?.toDate?.() || shop.billingExpiresAt;
   if (explicitExpiry) return new Date(explicitExpiry);
   const createdAt = shop.createdAt?.toDate?.() || shop.createdAt;
   return createdAt ? nextBillingDate(new Date(createdAt)) : null;
 }
 
-function assertBillingActive(shop: FirebaseFirestore.DocumentData) {
+function assertBillingActive(shop: Record<string, any>) {
   if (shop.billingStatus !== 'active') throw new Error('This shop account is suspended. Please pay the monthly fee.');
   const expiresAt = getBillingExpiry(shop);
   if (expiresAt && new Date(expiresAt) <= new Date()) throw new Error('Monthly payment is due. Please pay the monthly fee to unlock this shop.');
 }
 
-export async function listShopsAction(payload: { idToken: string }) {
+export async function listShopsAction(payload: { sessionProof: string }) {
   try {
-    const { firestore } = await requireSuperAdmin(payload.idToken);
-    const snapshot = await firestore.collection('shops').get();
+    const { mysql } = await requireSuperAdmin(payload.sessionProof);
+    const snapshot = await mysql.collection('shops').get();
     const shops = snapshot.docs
       .map((shop) => {
         const data = shop.data();
@@ -105,10 +105,10 @@ export async function listShopsAction(payload: { idToken: string }) {
   }
 }
 
-export async function getShopProfileAction(payload: { idToken: string; shopId: string }) {
+export async function getShopProfileAction(payload: { sessionProof: string; shopId: string }) {
   try {
-    const { firestore } = await requireShopAccess(payload.idToken, payload.shopId);
-    const snapshot = await firestore.collection('shops').doc(payload.shopId).get();
+    const { mysql } = await requireShopAccess(payload.sessionProof, payload.shopId);
+    const snapshot = await mysql.collection('shops').doc(payload.shopId).get();
     if (!snapshot.exists) throw new Error('Shop profile not found.');
     const data = snapshot.data() || {};
     return { success: true, shop: { id: snapshot.id, shopName: data.shopName || '', address: data.address || null, phone: data.phone || null, website: data.website || null } };
@@ -117,10 +117,10 @@ export async function getShopProfileAction(payload: { idToken: string; shopId: s
   }
 }
 
-export async function getShopBillingStatusAction(payload: { idToken: string; shopId: string }) {
+export async function getShopBillingStatusAction(payload: { sessionProof: string; shopId: string }) {
     try {
-      const { firestore } = await requireShopAccess(payload.idToken, payload.shopId);
-      const snapshot = await firestore.collection('shops').doc(payload.shopId).get();
+      const { mysql } = await requireShopAccess(payload.sessionProof, payload.shopId);
+      const snapshot = await mysql.collection('shops').doc(payload.shopId).get();
       if (!snapshot.exists) throw new Error('Shop not found.');
       const data = snapshot.data() || {};
       return { success: true, shop: { id: snapshot.id, shopName: data.shopName || '', billingStatus: data.billingStatus || 'active', billingExpiresAt: data.billingExpiresAt?.toMillis?.() || null } };
@@ -128,23 +128,23 @@ export async function getShopBillingStatusAction(payload: { idToken: string; sho
       return { success: false, error: error.message || 'Unable to load billing status.' };
     }
   }
-export async function updateShopProfileAction(payload: { idToken: string; shopId: string; shopName: string; address?: string; phone?: string; website?: string }) {
+export async function updateShopProfileAction(payload: { sessionProof: string; shopId: string; shopName: string; address?: string; phone?: string; website?: string }) {
   try {
-    const { firestore, role } = await requireShopAccess(payload.idToken, payload.shopId);
+    const { mysql, role } = await requireShopAccess(payload.sessionProof, payload.shopId);
     if (role !== 'shop owner' && role !== 'super administrator') throw new Error('Only a shop owner can update this profile.');
     const shopName = payload.shopName.trim();
     if (!shopName) throw new Error('Shop name is required.');
-    await firestore.collection('shops').doc(payload.shopId).update({ shopName, address: payload.address?.trim() || null, phone: payload.phone?.trim() || null, website: payload.website?.trim() || null });
+    await mysql.collection('shops').doc(payload.shopId).update({ shopName, address: payload.address?.trim() || null, phone: payload.phone?.trim() || null, website: payload.website?.trim() || null });
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message || 'Unable to save shop profile.' };
   }
 }
 
-export async function getShopPaymentSettingsAction(payload: { idToken: string; shopId: string }) {
+export async function getShopPaymentSettingsAction(payload: { sessionProof: string; shopId: string }) {
   try {
-    const { firestore } = await requireShopAccess(payload.idToken, payload.shopId);
-    const snapshot = await firestore.collection('shop_payment_settings').doc(payload.shopId).get();
+    const { mysql } = await requireShopAccess(payload.sessionProof, payload.shopId);
+    const snapshot = await mysql.collection('shop_payment_settings').doc(payload.shopId).get();
     const data = snapshot.data() || {};
     return {
       success: true,
@@ -164,7 +164,7 @@ export async function getShopPaymentSettingsAction(payload: { idToken: string; s
 }
 
 export async function updateShopPaymentSettingsAction(payload: {
-  idToken: string;
+  sessionProof: string;
   shopId: string;
   provider: 'manual_terminal' | 'stripe_terminal' | 'payfast' | 'paystack' | 'yoco' | 'ikhokha' | 'snapscan';
   displayName: string;
@@ -173,10 +173,10 @@ export async function updateShopPaymentSettingsAction(payload: {
   enabled: boolean;
 }) {
   try {
-    const { firestore, role } = await requireShopAccess(payload.idToken, payload.shopId);
+    const { mysql, role } = await requireShopAccess(payload.sessionProof, payload.shopId);
     if (role !== 'shop owner' && role !== 'super administrator') throw new Error('Only a shop owner can update payment settings.');
     if (!payload.displayName.trim()) throw new Error('Give this card machine a name.');
-    await firestore.collection('shop_payment_settings').doc(payload.shopId).set({
+    await mysql.collection('shop_payment_settings').doc(payload.shopId).set({
       shopId: payload.shopId,
       provider: payload.provider,
       displayName: payload.displayName.trim(),
@@ -192,17 +192,17 @@ export async function updateShopPaymentSettingsAction(payload: {
   }
 }
 
-export async function markShopPaidAction(payload: { idToken: string; shopId: string }) {
+export async function markShopPaidAction(payload: { sessionProof: string; shopId: string }) {
   try {
-    const { firestore, uid } = await requireSuperAdmin(payload.idToken);
-    const shopRef = firestore.collection('shops').doc(normalizeShopId(payload.shopId));
+    const { mysql, uid } = await requireSuperAdmin(payload.sessionProof);
+    const shopRef = mysql.collection('shops').doc(normalizeShopId(payload.shopId));
     const snapshot = await shopRef.get();
     if (!snapshot.exists) throw new Error('Shop not found.');
     const currentExpiry = getBillingExpiry(snapshot.data() || {});
     const baseDate = currentExpiry && new Date(currentExpiry) > new Date() ? new Date(currentExpiry) : new Date();
     const billingExpiresAt = nextBillingDate(baseDate);
     await shopRef.update({ billingStatus: 'active', billingExpiresAt: Timestamp.fromDate(billingExpiresAt), lastPaymentAt: Timestamp.now() });
-    await writeAuditEvent(firestore, {
+    await writeAuditEvent(mysql, {
       action: 'billing.month_paid',
       actorId: uid,
       shopId: shopRef.id,
@@ -216,16 +216,16 @@ export async function markShopPaidAction(payload: { idToken: string; shopId: str
   }
 }
 
-export async function createPayFastBillingCheckoutAction(payload: { idToken: string; shopId: string }) {
+export async function createPayFastBillingCheckoutAction(payload: { sessionProof: string; shopId: string }) {
   try {
-    const { firestore } = await requireShopAccess(payload.idToken, payload.shopId);
+    const { mysql } = await requireShopAccess(payload.sessionProof, payload.shopId);
     const appUrl = process.env.NEXT_PUBLIC_APP_URL;
     const merchantId = process.env.PAYFAST_MERCHANT_ID;
     const merchantKey = process.env.PAYFAST_MERCHANT_KEY;
     const passphrase = process.env.PAYFAST_PASSPHRASE;
     const amount = process.env.POS_MONTHLY_FEE_ZAR || '550.00';
     if (!appUrl || !merchantId || !merchantKey || !passphrase) throw new Error('PayFast billing is not configured yet.');
-    const shopSnapshot = await firestore.collection('shops').doc(normalizeShopId(payload.shopId)).get();
+    const shopSnapshot = await mysql.collection('shops').doc(normalizeShopId(payload.shopId)).get();
     if (!shopSnapshot.exists) throw new Error('Shop not found.');
     const paymentId = `${shopSnapshot.id}-${Date.now()}-${randomBytes(4).toString('hex')}`;
     const fields = {
@@ -238,24 +238,24 @@ export async function createPayFastBillingCheckoutAction(payload: { idToken: str
       amount: Number(amount).toFixed(2),
       item_name: `Monthly POS subscription - ${shopSnapshot.data()?.shopName || shopSnapshot.id}`,
     };
-    await firestore.collection('billing_payments').doc(paymentId).set({ shopId: shopSnapshot.id, amount: Number(amount), provider: 'payfast', status: 'pending', createdAt: Timestamp.now() });
+    await mysql.collection('billing_payments').doc(paymentId).set({ shopId: shopSnapshot.id, amount: Number(amount), provider: 'payfast', status: 'pending', createdAt: Timestamp.now() });
     return { success: true, paymentUrl: `${process.env.PAYFAST_BASE_URL || 'https://www.payfast.co.za'}/eng/process`, fields: { ...fields, signature: payFastSignature(fields, passphrase) } };
   } catch (error: any) {
     return { success: false, error: error.message || 'Unable to start PayFast checkout.' };
   }
 }
 
-export async function listAuditEventsAction(payload: { idToken: string; shopId?: string }) {
+export async function listAuditEventsAction(payload: { sessionProof: string; shopId?: string }) {
   try {
-    const { auth, firestore } = initializeFirebaseAdmin();
-    const decoded = await auth.verifyIdToken(payload.idToken);
-    const profile = await firestore.collection('users').doc(decoded.uid).get();
-    const isSuperAdmin = profile.data()?.role === 'super administrator' || (await firestore.collection('roles_super_admin').doc(decoded.uid).get()).exists;
+    const { auth, mysql } = initializeMysqlServer();
+    const decoded = await auth.verifySessionProof(payload.sessionProof);
+    const profile = await mysql.collection('users').doc(decoded.uid).get();
+    const isSuperAdmin = profile.data()?.role === 'super administrator' || (await mysql.collection('roles_super_admin').doc(decoded.uid).get()).exists;
     const shopId = isSuperAdmin ? payload.shopId : profile.data()?.shopId;
     if (!isSuperAdmin && !shopId) throw new Error('Your account is not assigned to a shop.');
-    let query: FirebaseFirestore.Query = shopId
-      ? firestore.collection('audit_logs').where('shopId', '==', shopId).limit(100)
-      : firestore.collection('audit_logs').limit(100);
+    let query: Query = shopId
+      ? mysql.collection('audit_logs').where('shopId', '==', shopId).limit(100)
+      : mysql.collection('audit_logs').limit(100);
     const snapshot = await query.get();
     return {
       success: true,
@@ -270,7 +270,7 @@ export async function listAuditEventsAction(payload: { idToken: string; shopId?:
 }
 
 export async function createShopAction(payload: {
-  idToken: string;
+  sessionProof: string;
   shopId: string;
   shopName: string;
   ownerEmail: string;
@@ -279,12 +279,12 @@ export async function createShopAction(payload: {
   maxDevicesAllowed: number;
 }) {
   try {
-    const { auth, firestore, uid } = await requireSuperAdmin(payload.idToken);
+    const { auth, mysql, uid } = await requireSuperAdmin(payload.sessionProof);
     const shopId = normalizeShopId(payload.shopId);
     const shopName = payload.shopName.trim();
     const ownerEmail = payload.ownerEmail.trim().toLowerCase();
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) throw new Error('A valid shop owner email is required.');
-    if (payload.ownerTemporaryPassword.length < 6) throw new Error('The temporary password must be at least 6 characters.');
+    if (payload.ownerTemporaryPassword.length < 10) throw new Error('The temporary password must be at least 10 characters.');
     if (!shopName) throw new Error('Shop name is required.');
     if (!Number.isInteger(payload.maxDevicesAllowed) || payload.maxDevicesAllowed < 1 || payload.maxDevicesAllowed > 100) {
       throw new Error('Device limit must be a whole number between 1 and 100.');
@@ -299,10 +299,10 @@ export async function createShopAction(payload: {
       password: payload.ownerTemporaryPassword,
       displayName: ownerEmail,
     });
-    const shopRef = firestore.collection('shops').doc(shopId);
+    const shopRef = mysql.collection('shops').doc(shopId);
     try {
       const now = Timestamp.now();
-      await firestore.runTransaction(async (transaction) => {
+      await mysql.runTransaction(async (transaction) => {
         const existing = await transaction.get(shopRef);
         if (existing.exists) throw new Error('That Shop ID already exists.');
         transaction.create(shopRef, {
@@ -320,7 +320,7 @@ export async function createShopAction(payload: {
           activationTokenCreatedAt: now,
           activationTokenExpiresAt: Timestamp.fromMillis(Date.now() + 24 * 60 * 60 * 1000),
         });
-        transaction.create(firestore.collection('users').doc(ownerRecord.uid), {
+        transaction.create(mysql.collection('users').doc(ownerRecord.uid), {
           id: ownerRecord.uid,
           name: ownerEmail.split('@')[0],
           surname: '',
@@ -330,9 +330,9 @@ export async function createShopAction(payload: {
           mustChangePassword: true,
           createdAt: now,
         });
-        transaction.create(firestore.collection('roles_admin').doc(ownerRecord.uid), { shopId, createdAt: now });
+        transaction.create(mysql.collection('roles_admin').doc(ownerRecord.uid), { shopId, createdAt: now });
         for (let index = 1; index <= payload.maxDevicesAllowed; index += 1) {
-          transaction.create(firestore.collection('device_seats').doc(`${shopId}_seat_${index}`), {
+          transaction.create(mysql.collection('device_seats').doc(`${shopId}_seat_${index}`), {
             shopId,
             seatNumber: index,
             hardwareId: null,
@@ -353,24 +353,24 @@ export async function createShopAction(payload: {
 }
 
 export async function registerDeviceAction(payload: {
-  idToken: string;
+  sessionProof: string;
   shopId: string;
   hardwareId: string;
 }) {
   try {
-    const { firestore } = initializeFirebaseAdmin();
-    const { auth: adminAuth } = initializeFirebaseAdmin();
-    if (!payload.idToken || !payload.hardwareId?.trim()) throw new Error('Device registration details are incomplete.');
-    const user = await adminAuth.verifyIdToken(payload.idToken);
-    const userProfile = await firestore.collection('users').doc(user.uid).get();
+    const { mysql } = initializeMysqlServer();
+    const { auth: adminAuth } = initializeMysqlServer();
+    if (!payload.sessionProof || !payload.hardwareId?.trim()) throw new Error('Device registration details are incomplete.');
+    const user = await adminAuth.verifySessionProof(payload.sessionProof);
+    const userProfile = await mysql.collection('users').doc(user.uid).get();
     if (userProfile.data()?.shopId !== payload.shopId) throw new Error('You are not assigned to this shop.');
-    const shopRef = firestore.collection('shops').doc(normalizeShopId(payload.shopId));
-    const result = await firestore.runTransaction(async (transaction) => {
+    const shopRef = mysql.collection('shops').doc(normalizeShopId(payload.shopId));
+    const result = await mysql.runTransaction(async (transaction) => {
       const shopSnapshot = await transaction.get(shopRef);
       if (!shopSnapshot.exists) throw new Error('Shop not found.');
       const shop = shopSnapshot.data()!;
       assertBillingActive(shop);
-      const seatsSnapshot = await transaction.get(firestore.collection('device_seats').where('shopId', '==', shopRef.id));
+      const seatsSnapshot = await transaction.get(mysql.collection('device_seats').where('shopId', '==', shopRef.id));
       const existing = seatsSnapshot.docs.find((seat) => seat.data().hardwareId === payload.hardwareId.trim());
       if (existing) {
         transaction.update(existing.ref, { lastSeenAt: Timestamp.now() });
@@ -393,10 +393,10 @@ export async function registerDeviceAction(payload: {
   }
 }
 
-export async function resetDeviceAction(payload: { idToken: string; seatId: string }) {
+export async function resetDeviceAction(payload: { sessionProof: string; seatId: string }) {
   try {
-    const { firestore } = await requireSuperAdmin(payload.idToken);
-    const seatRef = firestore.collection('device_seats').doc(payload.seatId);
+    const { mysql } = await requireSuperAdmin(payload.sessionProof);
+    const seatRef = mysql.collection('device_seats').doc(payload.seatId);
     await seatRef.update({
       hardwareId: null,
       terminalTokenHash: FieldValue.delete(),
@@ -415,11 +415,11 @@ export async function resetDeviceAction(payload: { idToken: string; seatId: stri
   }
 }
 
-export async function regenerateActivationTokenAction(payload: { idToken: string; shopId: string }) {
+export async function regenerateActivationTokenAction(payload: { sessionProof: string; shopId: string }) {
   try {
-    const { firestore } = await requireSuperAdmin(payload.idToken);
+    const { mysql } = await requireSuperAdmin(payload.sessionProof);
     const token = `SPAZA-${randomBytes(5).toString('hex').toUpperCase()}`;
-    const shopRef = firestore.collection('shops').doc(normalizeShopId(payload.shopId));
+    const shopRef = mysql.collection('shops').doc(normalizeShopId(payload.shopId));
     await shopRef.update({
       activationTokenHash: hashToken(token),
       activationToken: token,
@@ -432,10 +432,10 @@ export async function regenerateActivationTokenAction(payload: { idToken: string
   }
 }
 
-export async function listDeviceSeatsAction(payload: { idToken: string; shopId: string }) {
+export async function listDeviceSeatsAction(payload: { sessionProof: string; shopId: string }) {
   try {
-    const { firestore } = await requireSuperAdmin(payload.idToken);
-    const snapshot = await firestore.collection('device_seats')
+    const { mysql } = await requireSuperAdmin(payload.sessionProof);
+    const snapshot = await mysql.collection('device_seats')
       .where('shopId', '==', normalizeShopId(payload.shopId))
       .get();
     const seats = snapshot.docs.map((seat) => ({
@@ -458,19 +458,19 @@ export async function redeemActivationTokenAction(payload: {
   hardwareId: string;
 }) {
   try {
-    const { firestore } = initializeFirebaseAdmin();
+    const { mysql } = initializeMysqlServer();
     const token = payload.token.trim().toUpperCase();
     const hardwareId = payload.hardwareId.trim();
     if (!token || !hardwareId) throw new Error('Activation details are incomplete.');
 
-    const shopsSnapshot = await firestore.collection('shops')
+    const shopsSnapshot = await mysql.collection('shops')
       .where('activationTokenHash', '==', hashToken(token))
       .limit(1)
       .get();
     if (shopsSnapshot.empty) throw new Error('Invalid or already-used activation token.');
 
     const shopRef = shopsSnapshot.docs[0].ref;
-    return await firestore.runTransaction(async (transaction) => {
+    return await mysql.runTransaction(async (transaction) => {
       const shopSnapshot = await transaction.get(shopRef);
       if (!shopSnapshot.exists) throw new Error('Shop not found.');
       const shop = shopSnapshot.data()!;
@@ -480,7 +480,7 @@ export async function redeemActivationTokenAction(payload: {
       if (activationExpiresAt && activationExpiresAt < new Date()) throw new Error('This activation token has expired.');
 
       const seatsSnapshot = await transaction.get(
-        firestore.collection('device_seats').where('shopId', '==', shopRef.id)
+        mysql.collection('device_seats').where('shopId', '==', shopRef.id)
       );
       const now = Timestamp.now();
       const terminalToken = randomBytes(32).toString('hex');
@@ -524,7 +524,7 @@ export async function redeemActivationTokenAction(payload: {
 const LEASE_MS = 7 * 24 * 60 * 60 * 1000;
 const HEARTBEAT_FRESH_MS = 5 * 60 * 1000;
 
-function serializeTerminalStatus(data: FirebaseFirestore.DocumentData, now = Date.now()) {
+function serializeTerminalStatus(data: Record<string, any>, now = Date.now()) {
   const leaseExpiresAt = data.leaseExpiresAt?.toDate?.()?.getTime?.() || 0;
   const locked = data.lockState === 'locked' || leaseExpiresAt <= now;
   return {
@@ -543,8 +543,8 @@ export async function heartbeatTerminalAction(payload: {
   terminalToken: string;
 }) {
   try {
-    const { firestore } = initializeFirebaseAdmin();
-    const seats = await firestore.collection('device_seats')
+    const { mysql } = initializeMysqlServer();
+    const seats = await mysql.collection('device_seats')
       .where('shopId', '==', normalizeShopId(payload.shopId))
       .get();
     const seat = seats.docs.find((candidate) => candidate.data().hardwareId === payload.hardwareId.trim());
@@ -552,7 +552,7 @@ export async function heartbeatTerminalAction(payload: {
       throw new Error('Terminal is not registered.');
     }
     const leaseExpiresAt = seat.data().leaseExpiresAt?.toDate?.()?.getTime?.() || 0;
-    const shopSnapshot = await firestore.collection('shops').doc(normalizeShopId(payload.shopId)).get();
+    const shopSnapshot = await mysql.collection('shops').doc(normalizeShopId(payload.shopId)).get();
     if (!shopSnapshot.exists) throw new Error('Shop not found.');
     const shop = shopSnapshot.data()!;
     assertBillingActive(shop);
@@ -564,10 +564,10 @@ export async function heartbeatTerminalAction(payload: {
   }
 }
 
-export async function unlockShopTerminalsAction(payload: { idToken: string; shopId: string }) {
+export async function unlockShopTerminalsAction(payload: { sessionProof: string; shopId: string }) {
   try {
-    const { firestore } = await requireSuperAdmin(payload.idToken);
-    const seats = await firestore.collection('device_seats').where('shopId', '==', normalizeShopId(payload.shopId)).get();
+    const { mysql } = await requireSuperAdmin(payload.sessionProof);
+    const seats = await mysql.collection('device_seats').where('shopId', '==', normalizeShopId(payload.shopId)).get();
     const registered = seats.docs.filter((seat) => seat.data().hardwareId);
     const cutoff = Date.now() - HEARTBEAT_FRESH_MS;
     const offline = registered.filter((seat) => (seat.data().lastOnlineAt?.toDate?.()?.getTime?.() || 0) < cutoff);
@@ -587,15 +587,15 @@ export async function createShopOwnerAction(payload: {
   email: string;
   password: string;
 }) {
-  const { auth, firestore } = initializeFirebaseAdmin();
+  const { auth, mysql } = initializeMysqlServer();
   let createdUid: string | undefined;
   try {
     const setupToken = payload.setupToken.trim();
     if (!setupToken || !payload.name.trim() || !payload.surname.trim()) throw new Error('Owner details are incomplete.');
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(payload.email)) throw new Error('Enter a valid email address.');
-    if (payload.password.length < 6) throw new Error('Password must be at least 6 characters.');
+    if (payload.password.length < 10) throw new Error('Password must be at least 10 characters.');
 
-    const shops = await firestore.collection('shops')
+    const shops = await mysql.collection('shops')
       .where('ownerSetupTokenHash', '==', hashToken(setupToken))
       .limit(1)
       .get();
@@ -612,11 +612,11 @@ export async function createShopOwnerAction(payload: {
     });
     createdUid = userRecord.uid;
     const now = Timestamp.now();
-    await firestore.runTransaction(async (transaction) => {
+    await mysql.runTransaction(async (transaction) => {
       const currentShop = await transaction.get(shopRef);
       if (!currentShop.exists || !currentShop.data()?.ownerSetupTokenHash) throw new Error('This owner setup link has already been used.');
-      const profileRef = firestore.collection('users').doc(userRecord.uid);
-      const roleRef = firestore.collection('roles_admin').doc(userRecord.uid);
+      const profileRef = mysql.collection('users').doc(userRecord.uid);
+      const roleRef = mysql.collection('roles_admin').doc(userRecord.uid);
       transaction.create(profileRef, {
         id: userRecord.uid,
         name: payload.name.trim(),

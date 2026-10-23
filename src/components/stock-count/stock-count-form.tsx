@@ -24,13 +24,13 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Loader2 } from 'lucide-react';
-import { useAuth, useDoc, useFirestore, useUser } from '@/firebase';
-import { collection, query, doc, getDocs, where } from 'firebase/firestore';
+import { useAuth, useDoc, useMysql, useUser } from '@/auth';
+import { collection, query, doc, getDocs, where } from '@/lib/mysql-client';
 import type { Product, UserProfile } from '@/lib/types';
 import { applyStockCountAction } from '@/app/actions/advanced-pos-actions';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/hooks/use-toast';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useMemoMysql } from '@/auth/provider';
 import { cn } from '@/lib/utils';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
@@ -67,10 +67,10 @@ export function StockCountForm() {
 
   const { toast } = useToast();
 
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const auth = useAuth();
   const { user } = useUser();
-  const profileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const profileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: profile } = useDoc<UserProfile>(profileRef);
 
   const form = useForm<FormData>({
@@ -89,10 +89,10 @@ export function StockCountForm() {
 
   useEffect(() => {
     async function fetchInitialStock() {
-      if (!firestore || !profile?.shopId) return;
+      if (!mysql || !profile?.shopId) return;
       setIsLoadingProducts(true);
       try {
-        const productsQuery = query(collection(firestore, 'products'), where('shopId', '==', profile.shopId));
+        const productsQuery = query(collection(mysql, 'products'), where('shopId', '==', profile.shopId));
         const querySnapshot = await getDocs(productsQuery);
         const productsData = querySnapshot.docs.map(doc => ({ ...doc.data(), id: doc.id }) as Product).filter((product) => !product.isArchived);
         
@@ -117,7 +117,7 @@ export function StockCountForm() {
     }
     fetchInitialStock();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [firestore, profile?.shopId, replace, toast]);
+  }, [mysql, profile?.shopId, replace, toast]);
 
 
   const handleCompareStock = () => {
@@ -152,7 +152,7 @@ export function StockCountForm() {
   };
 
   async function handleUpdateStock(data: FormData) {
-    if (!firestore || !auth?.currentUser) return;
+    if (!mysql || !auth?.currentUser) return;
     setIsUpdating(true);
 
     const discrepantItems = data.items.filter(item => item.recordedCount !== item.actualCount);
@@ -174,7 +174,7 @@ export function StockCountForm() {
 
     let result;
     try {
-      result = await applyStockCountAction({ idToken: await auth.currentUser.getIdToken(), items: discrepantItems.map((item) => ({ productId: item.id, actualCount: item.actualCount })) });
+      result = await applyStockCountAction({ sessionProof: await auth.currentUser.getSessionProof(), items: discrepantItems.map((item) => ({ productId: item.id, actualCount: item.actualCount })) });
     } catch (error: any) {
       setIsUpdating(false);
       toast({ variant: 'destructive', title: 'Stock update failed', description: error.message || 'Unable to update stock.' });

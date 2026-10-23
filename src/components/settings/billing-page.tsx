@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { createPayFastBillingCheckoutAction, getShopBillingStatusAction } from '@/app/actions/shop-actions';
-import { useDoc, useFirestore, useUser } from '@/firebase';
-import { doc } from 'firebase/firestore';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useDoc, useMysql, useUser } from '@/auth';
+import { doc } from '@/lib/mysql-client';
+import { useMemoMysql } from '@/auth/provider';
 import type { UserProfile } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -12,28 +12,28 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 export function BillingPage() {
   const { user } = useUser();
-  const firestore = useFirestore();
-  const profileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const mysql = useMysql();
+  const profileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: profile } = useDoc<UserProfile>(profileRef);
   const { toast } = useToast();
   const [shop, setShop] = useState<{ shopName: string; billingStatus: string; billingExpiresAt: number | null } | null>(null);
   const [isStarting, setIsStarting] = useState(false);
 
   useEffect(() => {
-    if (!profile?.shopId || !firestore || !user) return;
+    if (!profile?.shopId || !mysql || !user) return;
     const currentShopId = profile.shopId;
     const currentUser = user;
     getShop();
     async function getShop() {
-      const result = await getShopBillingStatusAction({ idToken: await currentUser.getIdToken(), shopId: currentShopId });
+      const result = await getShopBillingStatusAction({ sessionProof: await currentUser.getSessionProof(), shopId: currentShopId });
       if (result.success && result.shop) setShop(result.shop);
     }
-  }, [firestore, profile?.shopId, user]);
+  }, [mysql, profile?.shopId, user]);
 
   const startPayment = async () => {
     if (!user || !profile?.shopId) return;
     setIsStarting(true);
-    const result = await createPayFastBillingCheckoutAction({ idToken: await user.getIdToken(), shopId: profile.shopId });
+    const result = await createPayFastBillingCheckoutAction({ sessionProof: await user.getSessionProof(), shopId: profile.shopId });
     if (!result.success || !result.paymentUrl || !result.fields) {
       toast({ variant: 'destructive', title: 'Unable to start payment', description: result.error });
       setIsStarting(false);

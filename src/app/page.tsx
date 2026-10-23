@@ -2,20 +2,20 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useUser, useFirestore, useDoc } from '@/firebase';
+import { useUser, useMysql, useDoc } from '@/auth';
 import { Skeleton } from '@/components/ui/skeleton';
-import { doc } from 'firebase/firestore';
-import { useMemoFirebase } from '@/firebase/provider';
+import { doc } from '@/lib/mysql-client';
+import { useMemoMysql } from '@/auth/provider';
 import type { UserProfile } from '@/lib/types';
 
 export default function RootPage() {
   const { user, isUserLoading } = useUser();
   const router = useRouter();
-  const firestore = useFirestore();
+  const mysql = useMysql();
 
-  const userProfileRef = useMemoFirebase(
-    () => (firestore && user ? doc(firestore, 'users', user.uid) : null),
-    [firestore, user]
+  const userProfileRef = useMemoMysql(
+    () => (mysql && user ? doc(mysql, 'users', user.uid) : null),
+    [mysql, user]
   );
   const { data: userProfile, isLoading: isProfileLoading } = useDoc<UserProfile>(userProfileRef);
 

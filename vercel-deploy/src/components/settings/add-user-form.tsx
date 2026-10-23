@@ -6,14 +6,13 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { sendPasswordResetEmail } from 'firebase/auth';
 import {
-  useFirestore,
+  useMysql,
   useDoc,
   useUser,
   useAuth,
-} from '@/firebase';
-import { doc } from 'firebase/firestore';
+} from '@/auth';
+import { doc } from '@/lib/mysql-client';
 import { createUserAction } from '@/app/actions/user-actions';
 
 import { Button } from '@/components/ui/button';
@@ -43,7 +42,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useMemoMysql } from '@/auth/provider';
 import type { UserProfile } from '@/lib/types';
 
 const formSchema = z
@@ -51,6 +50,7 @@ const formSchema = z
     name: z.string().min(1, 'Name is required'),
     surname: z.string().min(1, 'Surname is required'),
     email: z.string().email('Invalid email address'),
+    password: z.string().min(10, 'Use at least 10 characters'),
     role: z.enum(['shop owner', 'sales']),
   })
 
@@ -59,17 +59,17 @@ type FormData = z.infer<typeof formSchema>;
 export function AddUserForm() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const router = useRouter();
   const { user: currentUser } = useUser();
   const auth = useAuth();
 
-  const userProfileRef = useMemoFirebase(
+  const userProfileRef = useMemoMysql(
     () =>
-      firestore && currentUser
-        ? doc(firestore, 'users', currentUser.uid)
+      mysql && currentUser
+        ? doc(mysql, 'users', currentUser.uid)
         : null,
-    [firestore, currentUser]
+    [mysql, currentUser]
   );
   const { data: currentUserProfile } = useDoc<UserProfile>(userProfileRef);
   const isCurrentUserAdmin =
@@ -82,6 +82,7 @@ export function AddUserForm() {
       name: '',
       surname: '',
       email: '',
+      password: '',
       role: 'sales',
     },
   });
@@ -89,9 +90,7 @@ export function AddUserForm() {
   async function onSubmit(data: FormData) {
     setIsLoading(true);
     try {
-      if (!firestore) {
-        throw new Error('Firestore is not initialized.');
-      }
+      if (!mysql) throw new Error('MySQL data access is not initialized.');
       if (!auth?.currentUser) {
         throw new Error('You must be logged in as a shop owner or the super administrator.');
       }
@@ -103,19 +102,18 @@ export function AddUserForm() {
         surname: data.surname,
         role: data.role,
         displayName: `${data.name} ${data.surname}`,
-        idToken: await auth.currentUser.getIdToken(),
+        sessionProof: await auth.currentUser.getSessionProof(),
         shopId: currentUserProfile?.shopId,
+        password: data.password,
       });
 
       if (!result.success || !result.uid) {
         throw new Error(result.error || 'Failed to create user in Auth.');
       }
 
-      await sendPasswordResetEmail(auth, data.email);
-
       toast({
         title: 'User Created!',
-        description: `A password setup email was sent to ${data.email}.`,
+        description: `The account for ${data.email} was created. Share the password securely with the user.`,
       });
       form.reset(); // Reset form fields to allow adding another user
     } catch (error: any) {
@@ -135,7 +133,7 @@ export function AddUserForm() {
       <CardHeader>
         <CardTitle>New User Details</CardTitle>
         <CardDescription>
-          The user will receive an email to choose their own password.
+          Set an initial password for this account. Share it with the user through a secure channel.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -188,6 +186,19 @@ export function AddUserForm() {
                       placeholder="new.user@example.com"
                       {...field}
                       autoComplete="off"
+                    />
+                    <FormField
+                      control={form.control}
+                      name="password"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Initial password</FormLabel>
+                          <FormControl>
+                            <Input type="password" {...field} autoComplete="new-password" />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
                     />
                   </FormControl>
                   <FormMessage />

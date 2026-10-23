@@ -25,12 +25,11 @@ import {
 import { Input } from '@/components/ui/input';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2 } from 'lucide-react';
-import { useAuth, initiateEmailSignIn } from '@/firebase';
-import { sendPasswordResetEmail } from 'firebase/auth';
+import { initiateEmailSignIn } from '@/auth';
 
 const formSchema = z.object({
   email: z.string().email('Invalid email address'),
-  password: z.string().min(6, 'Password must be at least 6 characters'),
+  password: z.string().min(10, 'Password must be at least 10 characters'),
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -38,7 +37,6 @@ type FormData = z.infer<typeof formSchema>;
 export function LoginForm() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
-  const auth = useAuth();
   const router = useRouter();
 
   const form = useForm<FormData>({
@@ -52,35 +50,15 @@ export function LoginForm() {
   async function onSubmit(data: FormData) {
     setIsLoading(true);
     try {
-      if (!auth) throw new Error('Auth not initialized');
-      await initiateEmailSignIn(auth, data.email, data.password);
+      const result = await initiateEmailSignIn(data.email, data.password);
       toast({
         title: 'Login Successful!',
         description: "You've been successfully logged in.",
       });
-      router.push('/');
+      router.push(result.user.mustChangePassword ? '/change-password' : '/');
     } catch (error: any) {
-      if (error.message === 'Auth not initialized') {
-        toast({
-          variant: 'destructive',
-          title: 'Auth Not Ready',
-          description: 'Authentication is not ready. Please refresh the page and try again.'
-        });
-        setIsLoading(false);
-        return;
-      }
-      let description = 'An unexpected error occurred. Please try again.';
-      if (error.code === 'auth/invalid-credential') {
-        description = 'Invalid email or password. Please check your credentials.';
-        // Clear password field on failed attempt
-        form.reset({
-          email: data.email, // keep the email
-          password: '', // clear the password
-        });
-      } else {
-        // Log other, unexpected errors
-        console.error(error);
-      }
+      const description = error instanceof Error ? error.message : 'An unexpected error occurred. Please try again.';
+      form.reset({ email: data.email, password: '' });
       toast({
         variant: 'destructive',
         title: 'Login Failed',
@@ -88,26 +66,6 @@ export function LoginForm() {
       });
     } finally {
       setIsLoading(false);
-    }
-  }
-
-  async function resendPasswordSetup() {
-    const email = form.getValues('email');
-    const parsedEmail = z.string().email().safeParse(email);
-    if (!parsedEmail.success) {
-      toast({ variant: 'destructive', title: 'Enter your email first', description: 'Type the account email to receive a password setup link.' });
-      return;
-    }
-    if (email.trim().toLowerCase() === 'jeff@gmail.com') {
-      toast({ variant: 'destructive', title: 'Protected account', description: 'Password recovery for the protected super administrator is disabled here.' });
-      return;
-    }
-    try {
-      if (!auth) throw new Error('Auth not initialized');
-      await sendPasswordResetEmail(auth, email);
-      toast({ title: 'Password setup email sent', description: 'Check your inbox and follow the Firebase link to choose a password.' });
-    } catch (error: any) {
-      toast({ variant: 'destructive', title: 'Unable to send email', description: error.code === 'auth/user-not-found' ? 'No account was found for that email.' : 'Please check the email and try again.' });
     }
   }
 
@@ -160,13 +118,10 @@ export function LoginForm() {
               {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Login
             </Button>
-            <Button type="button" variant="link" className="w-full" onClick={resendPasswordSetup}>
-              Set or reset my password
-            </Button>
           </form>
         </Form>
         <div className="mt-4 text-center text-sm text-muted-foreground px-4">
-          Don&apos;t have an account? Please contact your manager to have one created for you.
+          Password setup and recovery are managed by your shop administrator.
         </div>
       </CardContent>
     </Card>

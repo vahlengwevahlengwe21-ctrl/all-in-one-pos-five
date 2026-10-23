@@ -27,9 +27,9 @@ import { useToast } from '@/hooks/use-toast';
 import { Loader2, Upload } from 'lucide-react';
 import { useState } from 'react';
 import Image from 'next/image';
-import { useFirestore, addDocumentNonBlocking, useUser, useDoc } from '@/firebase';
-import { collection, doc } from 'firebase/firestore';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useMysql, addDocumentNonBlocking, useUser, useDoc } from '@/auth';
+import { collection, doc } from '@/lib/mysql-client';
+import { useMemoMysql } from '@/auth/provider';
 import type { UserProfile } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 
@@ -56,9 +56,9 @@ export function AddProductForm() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(null);
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { user } = useUser();
-  const profileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const profileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: profile } = useDoc<UserProfile>(profileRef);
   const router = useRouter();
 
@@ -99,18 +99,18 @@ export function AddProductForm() {
   async function onSubmit(data: FormData) {
     setIsLoading(true);
 
-    if (!firestore) {
+    if (!mysql) {
       toast({
         variant: 'destructive',
         title: 'Error',
-        description: 'Firestore is not initialized.',
+        description: 'The MySQL data service is not initialized.',
       });
       setIsLoading(false);
       return;
     }
 
     try {
-      const productsCollection = collection(firestore, 'products');
+      const productsCollection = collection(mysql, 'products');
       const { image, ...productData } = data;
       
       // If baseProductSku is empty, it's a base product, so its base SKU is its own SKU.

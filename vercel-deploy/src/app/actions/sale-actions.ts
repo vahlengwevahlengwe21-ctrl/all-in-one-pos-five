@@ -1,7 +1,7 @@
 'use server';
 
-import { initializeFirebaseAdmin } from '@/firebase/server';
-import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { initializeMysqlServer } from '@/lib/mysql-auth-server';
+import { FieldValue, Timestamp, type DocumentReference, type DocumentSnapshot, type MysqlStore, type Transaction } from '@/lib/mysql-store';
 import { writeAuditEvent } from '@/lib/audit';
 
 type SaleLine = {
@@ -14,7 +14,7 @@ type SaleLine = {
 
 type Actor = { uid: string; name?: string | null; email?: string | null };
 type CreateSalePayload = {
-  idToken: string;
+  sessionProof: string;
   idempotencyKey?: string;
   sale: {
     shopId?: string;
@@ -48,22 +48,22 @@ type CreateSalePayload = {
   items: Array<SaleLine & { productName: string }>;
 };
 
-async function requireAdmin(idToken: string) {
-  const { auth, firestore } = initializeFirebaseAdmin();
-  if (!idToken) throw new Error('Authentication token is missing.');
-  const decoded = await auth.verifyIdToken(idToken);
-  const roleDoc = await firestore.collection('roles_admin').doc(decoded.uid).get();
+async function requireAdmin(sessionProof: string) {
+  const { auth, mysql } = initializeMysqlServer();
+  if (!sessionProof) throw new Error('Authentication token is missing.');
+  const decoded = await auth.verifySessionProof(sessionProof);
+  const roleDoc = await mysql.collection('roles_admin').doc(decoded.uid).get();
   if (!roleDoc.exists) throw new Error('Only administrators can perform this action.');
-  const profile = await firestore.collection('users').doc(decoded.uid).get();
+  const profile = await mysql.collection('users').doc(decoded.uid).get();
   return {
-    firestore,
+    mysql,
     actor: { uid: decoded.uid, name: decoded.name, email: decoded.email } as Actor,
     shopId: profile.data()?.shopId || null,
     isSuperAdmin: profile.data()?.role === 'super administrator',
   };
 }
 
-function assertBillingActive(shop: FirebaseFirestore.DocumentData) {
+function assertBillingActive(shop: Record<string, any>) {
   const explicitExpiry = shop.billingExpiresAt?.toDate?.() || shop.billingExpiresAt;
   const createdAt = shop.createdAt?.toDate?.() || shop.createdAt;
   const expiresAt = explicitExpiry || (createdAt ? new Date(new Date(createdAt).getFullYear(), new Date(createdAt).getMonth() + 1, 1) : null);
@@ -78,10 +78,10 @@ function stockStatus(stock: number, threshold: number) {
 
 export async function createSaleAction(payload: CreateSalePayload) {
   try {
-    const { auth, firestore } = initializeFirebaseAdmin();
-    if (!payload.idToken) throw new Error('Authentication token is missing.');
-    const decoded = await auth.verifyIdToken(payload.idToken);
-    const profileSnapshot = await firestore.collection('users').doc(decoded.uid).get();
+    const { auth, mysql } = initializeMysqlServer();
+    if (!payload.sessionProof) throw new Error('Authentication token is missing.');
+    const decoded = await auth.verifySessionProof(payload.sessionProof);
+    const profileSnapshot = await mysql.collection('users').doc(decoded.uid).get();
     if (!profileSnapshot.exists) throw new Error('Your user profile was not found.');
     const profile = profileSnapshot.data()!;
     if (profile.role !== 'shop owner' && profile.role !== 'sales') {
@@ -93,7 +93,7 @@ export async function createSaleAction(payload: CreateSalePayload) {
     }
     for (const discount of payload.sale.discounts || []) {
       if (!discount.promoCode) continue;
-      const discountSnapshot = await firestore.collection('discounts')
+      const discountSnapshot = await mysql.collection('discounts')
         .where('shopId', '==', profile.shopId)
         .where('promoCode', '==', discount.promoCode.trim())
         .where('isActive', '==', true)
@@ -114,14 +114,14 @@ export async function createSaleAction(payload: CreateSalePayload) {
       throw new Error('Sale shop does not match the signed-in user.');
     }
     if (profile.shopId) {
-      const shopSnapshot = await firestore.collection('shops').doc(profile.shopId).get();
+      const shopSnapshot = await mysql.collection('shops').doc(profile.shopId).get();
       if (!shopSnapshot.exists) throw new Error('Your shop account was not found.');
       assertBillingActive(shopSnapshot.data()!);
     }
 
     const productQuery = profile.shopId
-      ? firestore.collection('products').where('shopId', '==', profile.shopId)
-      : firestore.collection('products');
+      ? mysql.collection('products').where('shopId', '==', profile.shopId)
+      : mysql.collection('products');
     const products = (await productQuery.get()).docs.map((snapshot) => ({ id: snapshot.id, ...snapshot.data() })) as Array<{
       id: string; name: string; sku: string; price: number; costPrice?: number; stock: number; threshold?: number; baseProductSku?: string; containedUnits?: number;
     }>;
@@ -141,8 +141,8 @@ export async function createSaleAction(payload: CreateSalePayload) {
 
     const saleId = payload.idempotencyKey
       ? `offline_${payload.idempotencyKey.replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80)}`
-      : firestore.collection('sales').doc().id;
-    const saleRef = firestore.collection('sales').doc(saleId);
+      : mysql.collection('sales').doc().id;
+    const saleRef = mysql.collection('sales').doc(saleId);
     const taxRate = payload.sale.taxRate || 0;
     if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 1) throw new Error('Tax rate must be between 0% and 100%.');
     let discountTotal = 0;
@@ -190,29 +190,29 @@ export async function createSaleAction(payload: CreateSalePayload) {
       costOfGoods,
       grossProfit: total - costOfGoods,
     };
-    await firestore.runTransaction(async (transaction) => {
+    await mysql.runTransaction(async (transaction) => {
       const existingSale = await transaction.get(saleRef);
       if (existingSale.exists) return;
-      const reads = new Map<string, FirebaseFirestore.DocumentSnapshot>();
+      const reads = new Map<string, DocumentSnapshot>();
       for (const baseSku of groups.keys()) {
         const linked = products.filter((product) => product.sku === baseSku || product.baseProductSku === baseSku);
         const base = linked.find((product) => product.sku === baseSku) || linked[0];
         if (!base) throw new Error(`Base product ${baseSku} was not found.`);
         for (const product of linked) {
-          const ref = firestore.collection('products').doc(product.id);
+          const ref = mysql.collection('products').doc(product.id);
           reads.set(product.id, await transaction.get(ref));
         }
       }
       const customerSnapshot = saleToStore.customerId
-        ? await transaction.get(firestore.collection('customers').doc(saleToStore.customerId))
+        ? await transaction.get(mysql.collection('customers').doc(saleToStore.customerId))
         : null;
       const creditSnapshot = saleToStore.storeCreditCode
         ? await transaction.get(
-          firestore.collection('store_credits').where('code', '==', saleToStore.storeCreditCode).limit(1)
+          mysql.collection('store_credits').where('code', '==', saleToStore.storeCreditCode).limit(1)
         )
         : null;
       const drawerSnapshot = cashTender > 0
-        ? await transaction.get(firestore.collection('cash_drawers').where('salespersonId', '==', decoded.uid))
+        ? await transaction.get(mysql.collection('cash_drawers').where('salespersonId', '==', decoded.uid))
         : null;
       const timestamp = Timestamp.now();
       for (const [baseSku, units] of groups) {
@@ -224,12 +224,12 @@ export async function createSaleAction(payload: CreateSalePayload) {
         const newBaseStock = available - units;
         for (const product of linked) {
           const stock = product.id === base.id ? newBaseStock : Math.floor(newBaseStock / (product.containedUnits || 1));
-          transaction.update(firestore.collection('products').doc(product.id), { stock, status: stockStatus(stock, product.threshold || 0) });
+          transaction.update(mysql.collection('products').doc(product.id), { stock, status: stockStatus(stock, product.threshold || 0) });
         }
       }
       // Update customer if provided
       if (saleToStore.customerId) {
-        const customerRef = firestore.collection('customers').doc(saleToStore.customerId);
+        const customerRef = mysql.collection('customers').doc(saleToStore.customerId);
         const now = Timestamp.now();
         if (customerSnapshot?.exists) {
           const customerData = customerSnapshot.data()!;
@@ -288,7 +288,7 @@ export async function createSaleAction(payload: CreateSalePayload) {
         });
       });
     });
-    await writeAuditEvent(firestore, {
+    await writeAuditEvent(mysql, {
       action: 'sale.completed',
       actorId: decoded.uid,
       actorName: `${profile.name || ''} ${profile.surname || ''}`.trim(),
@@ -305,8 +305,8 @@ export async function createSaleAction(payload: CreateSalePayload) {
 }
 
 async function reverseInventory(
-  transaction: FirebaseFirestore.Transaction,
-  firestore: FirebaseFirestore.Firestore,
+  transaction: Transaction,
+  mysql: MysqlStore,
   items: SaleLine[],
   type: 'void' | 'return',
   actor: Actor,
@@ -315,8 +315,8 @@ async function reverseInventory(
   shopId: string | null
 ) {
   const productQuery = shopId
-    ? firestore.collection('products').where('shopId', '==', shopId)
-    : firestore.collection('products');
+    ? mysql.collection('products').where('shopId', '==', shopId)
+    : mysql.collection('products');
   const productSnapshots = await productQuery.get();
   const products = productSnapshots.docs.map((snapshot) => ({
     id: snapshot.id,
@@ -339,7 +339,7 @@ async function reverseInventory(
     unitsByBaseSku.set(baseSku, (unitsByBaseSku.get(baseSku) || 0) + units);
   }
 
-  const updates: Array<{ ref: FirebaseFirestore.DocumentReference; stock: number; threshold: number }> = [];
+  const updates: Array<{ ref: DocumentReference; stock: number; threshold: number }> = [];
   for (const [baseSku, units] of unitsByBaseSku) {
     const linkedProducts = products.filter(
       (product) => product.sku === baseSku || product.baseProductSku === baseSku
@@ -347,13 +347,13 @@ async function reverseInventory(
     const baseProduct = linkedProducts.find((product) => product.sku === baseSku) || linkedProducts[0];
     if (!baseProduct) throw new Error(`Base product ${baseSku} was not found.`);
 
-    const baseRef = firestore.collection('products').doc(baseProduct.id);
+    const baseRef = mysql.collection('products').doc(baseProduct.id);
     const baseSnapshot = await transaction.get(baseRef);
     if (!baseSnapshot.exists) throw new Error(`Base product ${baseSku} was not found.`);
     const newBaseStock = (baseSnapshot.data()?.stock || 0) + units;
 
     for (const product of linkedProducts) {
-      const ref = firestore.collection('products').doc(product.id);
+      const ref = mysql.collection('products').doc(product.id);
       const snapshot = product.id === baseProduct.id ? baseSnapshot : await transaction.get(ref);
       if (!snapshot.exists) throw new Error(`Product ${product.id} was not found.`);
       const stock = product.id === baseProduct.id
@@ -366,7 +366,7 @@ async function reverseInventory(
   updates.forEach(({ ref, stock, threshold }) =>
     transaction.update(ref, { stock, status: stockStatus(stock, threshold) })
   );
-  const movementRef = firestore.collection('inventory_transactions').doc();
+  const movementRef = mysql.collection('inventory_transactions').doc();
   transaction.set(movementRef, {
     type,
     referenceId,
@@ -379,19 +379,18 @@ async function reverseInventory(
 }
 
 async function restoreStoreCredit(
-  transaction: FirebaseFirestore.Transaction,
-  firestore: FirebaseFirestore.Firestore,
-  sale: FirebaseFirestore.DocumentData,
-  amount: number,
-  referenceId: string
-) : Promise<{ ref: FirebaseFirestore.DocumentReference; amount: number; balance: number } | null> {
+  transaction: Transaction,
+  mysql: MysqlStore,
+  sale: Record<string, any>,
+  amount: number
+) : Promise<{ ref: DocumentReference; amount: number; balance: number } | null> {
   const originalAmount = sale.storeCreditAmount || 0;
   const alreadyRestored = sale.storeCreditRestoredAmount || 0;
   const restoreAmount = Math.min(amount, Math.max(0, originalAmount - alreadyRestored));
   if (!sale.storeCreditCode || restoreAmount <= 0) return null;
 
   const creditsSnapshot = await transaction.get(
-    firestore.collection('store_credits').where('code', '==', sale.storeCreditCode).limit(1)
+    mysql.collection('store_credits').where('code', '==', sale.storeCreditCode).limit(1)
   );
   if (creditsSnapshot.empty) throw new Error('Store credit used by this sale was not found.');
   const creditDoc = creditsSnapshot.docs[0];
@@ -400,8 +399,8 @@ async function restoreStoreCredit(
 }
 
 function applyStoreCreditRestoration(
-  transaction: FirebaseFirestore.Transaction,
-  restoration: { ref: FirebaseFirestore.DocumentReference; amount: number; balance: number } | null,
+  transaction: Transaction,
+  restoration: { ref: DocumentReference; amount: number; balance: number } | null,
   referenceId: string
 ) {
   if (!restoration) return;
@@ -416,13 +415,13 @@ function applyStoreCreditRestoration(
   });
 }
 
-export async function voidSaleAction(payload: { saleId: string; idToken: string; reason: string }) {
+export async function voidSaleAction(payload: { saleId: string; sessionProof: string; reason: string }) {
   try {
-    const { firestore, actor, shopId, isSuperAdmin } = await requireAdmin(payload.idToken);
+    const { mysql, actor, shopId, isSuperAdmin } = await requireAdmin(payload.sessionProof);
     if (!payload.reason?.trim()) throw new Error('A reason is required to void a sale.');
-    const saleRef = firestore.collection('sales').doc(payload.saleId);
+    const saleRef = mysql.collection('sales').doc(payload.saleId);
     let auditShopId: string | null = null;
-    const movementId = await firestore.runTransaction(async (transaction) => {
+    const movementId = await mysql.runTransaction(async (transaction) => {
       const saleSnapshot = await transaction.get(saleRef);
       if (!saleSnapshot.exists) throw new Error('Sale not found.');
       const sale = saleSnapshot.data()!;
@@ -432,8 +431,8 @@ export async function voidSaleAction(payload: { saleId: string; idToken: string;
       if ((sale.returnedTotal || 0) > 0) throw new Error('A sale with returns cannot be voided.');
       const itemSnapshots = await transaction.get(saleRef.collection('items'));
       const items = itemSnapshots.docs.map((item) => item.data()) as SaleLine[];
-      const creditRestoration = await restoreStoreCredit(transaction, firestore, sale, sale.storeCreditAmount || 0, payload.saleId);
-      const id = await reverseInventory(transaction, firestore, items, 'void', actor, payload.reason.trim(), payload.saleId, sale.shopId || shopId);
+      const creditRestoration = await restoreStoreCredit(transaction, mysql, sale, sale.storeCreditAmount || 0);
+      const id = await reverseInventory(transaction, mysql, items, 'void', actor, payload.reason.trim(), payload.saleId, sale.shopId || shopId);
       applyStoreCreditRestoration(transaction, creditRestoration, payload.saleId);
       transaction.update(saleRef, {
         status: 'voided',
@@ -445,7 +444,7 @@ export async function voidSaleAction(payload: { saleId: string; idToken: string;
       });
       return id;
     });
-    await writeAuditEvent(firestore, {
+    await writeAuditEvent(mysql, {
       action: 'sale.voided',
       actorId: actor.uid,
       actorName: actor.name,
@@ -463,17 +462,17 @@ export async function voidSaleAction(payload: { saleId: string; idToken: string;
 
 export async function returnSaleAction(payload: {
   saleId: string;
-  idToken: string;
+  sessionProof: string;
   reason: string;
   refundMethod: 'cash' | 'card';
   items: Array<{ itemId: string; quantity: number }>;
 }) {
   try {
-    const { firestore, actor, shopId, isSuperAdmin } = await requireAdmin(payload.idToken);
+    const { mysql, actor, shopId, isSuperAdmin } = await requireAdmin(payload.sessionProof);
     if (!payload.reason?.trim()) throw new Error('A reason is required for the return.');
-    const saleRef = firestore.collection('sales').doc(payload.saleId);
+    const saleRef = mysql.collection('sales').doc(payload.saleId);
     let auditShopId: string | null = null;
-    await firestore.runTransaction(async (transaction) => {
+    await mysql.runTransaction(async (transaction) => {
       const saleSnapshot = await transaction.get(saleRef);
       if (!saleSnapshot.exists) throw new Error('Sale not found.');
       const sale = saleSnapshot.data()!;
@@ -485,7 +484,7 @@ export async function returnSaleAction(payload: {
       const itemSnapshots = await transaction.get(saleRef.collection('items'));
       const itemMap = new Map(itemSnapshots.docs.map((item) => [item.id, { ref: item.ref, data: item.data() as SaleLine & { returnedQuantity?: number } }]));
       const lines: SaleLine[] = [];
-      const itemUpdates: Array<{ ref: FirebaseFirestore.DocumentReference; returnedQuantity: number }> = [];
+      const itemUpdates: Array<{ ref: DocumentReference; returnedQuantity: number }> = [];
       let refundAmount = 0;
       for (const selectedItem of selected) {
         const stored = itemMap.get(selectedItem.itemId);
@@ -500,12 +499,11 @@ export async function returnSaleAction(payload: {
       const refundWithTax = sale.subtotal > 0 ? refundAmount * (sale.total + (sale.storeCreditAmount || 0)) / sale.subtotal : refundAmount;
       const creditRestoration = await restoreStoreCredit(
         transaction,
-        firestore,
+        mysql,
         sale,
-        sale.storeCreditAmount ? refundWithTax * sale.storeCreditAmount / (sale.total + sale.storeCreditAmount) : 0,
-        `${payload.saleId}:${returnRef.id}`
+        sale.storeCreditAmount ? refundWithTax * sale.storeCreditAmount / (sale.total + sale.storeCreditAmount) : 0
       );
-      const movementId = await reverseInventory(transaction, firestore, lines, 'return', actor, payload.reason.trim(), payload.saleId, sale.shopId || shopId);
+      const movementId = await reverseInventory(transaction, mysql, lines, 'return', actor, payload.reason.trim(), payload.saleId, sale.shopId || shopId);
       itemUpdates.forEach(({ ref, returnedQuantity }) => transaction.update(ref, { returnedQuantity }));
       applyStoreCreditRestoration(transaction, creditRestoration, `${payload.saleId}:${returnRef.id}`);
       transaction.set(returnRef, {
@@ -528,7 +526,7 @@ export async function returnSaleAction(payload: {
         storeCreditRestoredAmount: (sale.storeCreditRestoredAmount || 0) + (creditRestoration?.amount || 0),
       });
     });
-    await writeAuditEvent(firestore, {
+    await writeAuditEvent(mysql, {
       action: 'sale.returned',
       actorId: actor.uid,
       actorName: actor.name,

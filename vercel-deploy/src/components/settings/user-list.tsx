@@ -8,9 +8,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
-import { useCollection, useFirestore, useUser, useAuth, useDoc } from '@/firebase';
-import { useMemoFirebase } from '@/firebase/provider';
-import { collection, doc, query, orderBy, where } from 'firebase/firestore';
+import { useCollection, useMysql, useUser, useAuth, useDoc } from '@/auth';
+import { useMemoMysql } from '@/auth/provider';
+import { collection, doc, query, orderBy, where } from '@/lib/mysql-client';
 import type { UserProfile } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { format } from 'date-fns';
@@ -21,31 +21,29 @@ import { useToast } from '@/hooks/use-toast';
 import { deleteUserAction } from '@/app/actions/user-actions';
 import Link from 'next/link';
 
-const PROTECTED_SUPER_ADMIN_EMAIL = 'jeff@gmail.com';
-
 export function UserList() {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { user: currentUser, isUserLoading } = useUser();
   const auth = useAuth();
   const { toast } = useToast();
-  const currentUserProfileRef = useMemoFirebase(
-    () => (firestore && currentUser ? doc(firestore, 'users', currentUser.uid) : null),
-    [firestore, currentUser]
+  const currentUserProfileRef = useMemoMysql(
+    () => (mysql && currentUser ? doc(mysql, 'users', currentUser.uid) : null),
+    [mysql, currentUser]
   );
   const { data: currentUserProfile, isLoading: isProfileLoading } = useDoc<UserProfile>(currentUserProfileRef);
 
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
-  const usersQuery = useMemoFirebase(
+  const usersQuery = useMemoMysql(
     () =>
-      firestore
+      mysql
         ? currentUserProfile?.role === 'super administrator'
-          ? query(collection(firestore, 'users'), orderBy('createdAt', 'desc'))
+          ? query(collection(mysql, 'users'), orderBy('createdAt', 'desc'))
           : currentUserProfile?.shopId
-            ? query(collection(firestore, 'users'), where('shopId', '==', currentUserProfile.shopId))
+            ? query(collection(mysql, 'users'), where('shopId', '==', currentUserProfile.shopId))
             : null
         : null,
-    [firestore, currentUserProfile?.role, currentUserProfile?.shopId]
+    [mysql, currentUserProfile?.role, currentUserProfile?.shopId]
   );
   const { data: users, isLoading: isLoadingUsers } =
     useCollection<UserProfile>(usersQuery);
@@ -67,7 +65,7 @@ export function UserList() {
     try {
       const result = await deleteUserAction({
         userId: userToDelete.id,
-        idToken: auth?.currentUser ? await auth.currentUser.getIdToken() : '',
+        sessionProof: auth?.currentUser ? await auth.currentUser.getSessionProof() : '',
       });
 
       if (result.success) {
@@ -104,7 +102,7 @@ export function UserList() {
   };
 
   const isProtectedSuperAdmin = (user: UserProfile) =>
-    user.email.toLowerCase() === PROTECTED_SUPER_ADMIN_EMAIL || user.role === 'super administrator';
+    user.role === 'super administrator';
 
   const getDeleteTitle = (user: UserProfile) => {
     if (currentUser?.uid === user.id) return "You can't delete your own account";

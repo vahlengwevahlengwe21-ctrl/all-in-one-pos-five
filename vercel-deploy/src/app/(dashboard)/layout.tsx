@@ -11,11 +11,13 @@ import {
 } from '@/components/ui/sidebar';
 import { Header } from '@/components/header';
 import { Nav } from '@/components/nav';
-import { useDoc, useFirestore, useUser } from '@/firebase';
-import { doc } from 'firebase/firestore';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useDoc, useMysql, useUser } from '@/auth';
+import { doc } from '@/lib/mysql-client';
+import { useMemoMysql } from '@/auth/provider';
 import type { UserProfile } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { useSelectedShopContext } from '@/contexts/shop-context';
 
 export default function DashboardLayout({
   children,
@@ -23,20 +25,21 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const { user, isUserLoading } = useUser();
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const pathname = usePathname();
   const router = useRouter();
   const [isElectron, setIsElectron] = useState<boolean | null>(null);
-  const userProfileRef = useMemoFirebase(
-    () => (firestore && user ? doc(firestore, 'users', user.uid) : null),
-    [firestore, user]
+  const userProfileRef = useMemoMysql(
+    () => (mysql && user ? doc(mysql, 'users', user.uid) : null),
+    [mysql, user]
   );
   const { data: userProfile, isLoading: isProfileLoading } = useDoc<UserProfile>(userProfileRef);
+  const { shops, selectedShopId, setSelectedShopId, isLoading: shopsLoading, isSuperAdmin: hasShopContextSuperAdmin } = useSelectedShopContext();
   const adminOnlyRoute = ['/dashboard', '/products', '/cash-up', '/stock-count', '/reports', '/sales', '/settings']
     .some((route) => pathname === route || pathname.startsWith(`${route}/`));
   const isSalesUser = userProfile?.role === 'sales';
   const isShopOwner = userProfile?.role === 'shop owner';
-  const isSuperAdmin = userProfile?.role === 'super administrator';
+  const isSuperAdmin = userProfile?.role === 'super administrator' || hasShopContextSuperAdmin;
   const canUseWebDashboard = isSuperAdmin || isShopOwner;
   const isPosRoute = pathname === '/pos' || pathname.startsWith('/pos/');
 
@@ -124,6 +127,34 @@ export default function DashboardLayout({
         <div className="flex flex-col">
           <Header />
           <SidebarInset>
+            {isSuperAdmin && (
+              <div className="border-b bg-muted/30 px-4 py-3 lg:px-6">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Current shop scope</p>
+                    <p className="text-sm text-muted-foreground">All dashboard, products, sales, stock, and reports below are filtered to one shop only.</p>
+                  </div>
+                  <div className="w-full max-w-sm">
+                    <Select
+                      value={selectedShopId || undefined}
+                      onValueChange={(value) => setSelectedShopId(value)}
+                      disabled={shopsLoading || shops.length === 0}
+                    >
+                      <SelectTrigger className="w-full bg-background">
+                        <SelectValue placeholder={shopsLoading ? 'Loading shops...' : 'Select a shop'} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {shops.map((shop) => (
+                          <SelectItem key={shop.id} value={shop.id}>
+                            {shop.shopName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            )}
             <main className="flex flex-1 flex-col gap-4 p-4 lg:gap-6 lg:p-6 bg-background">
               {children}
             </main>

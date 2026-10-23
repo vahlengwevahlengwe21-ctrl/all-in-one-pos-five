@@ -3,7 +3,7 @@
 import Image from 'next/image';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuth } from '@/firebase';
+import { useAuth } from '@/auth';
 import { completePasswordSetupAction } from '@/app/actions/user-actions';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -22,12 +22,12 @@ export default function ChangePasswordPage() {
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (password.length < 6) return toast({ variant: 'destructive', title: 'Password too short', description: 'Use at least 6 characters.' });
+    if (password.length < 10) return toast({ variant: 'destructive', title: 'Password too short', description: 'Use at least 10 characters.' });
     if (password !== confirmPassword) return toast({ variant: 'destructive', title: 'Passwords do not match' });
-    if (!auth?.currentUser) return router.replace('/login');
+    if (!auth.currentUser) return router.replace('/login');
     setIsSaving(true);
     try {
-      const result = await completePasswordSetupAction({ idToken: await auth.currentUser.getIdToken(true), password });
+      const result = await completePasswordSetupAction({ sessionProof: await auth.currentUser.getSessionProof(true), password });
       if (!result.success) throw new Error(result.error || 'Unable to update password.');
       toast({ title: 'Password updated', description: 'Your account is ready to use.' });
       router.replace('/');
@@ -46,12 +46,12 @@ export default function ChangePasswordPage() {
             <Image src="/00.png" alt="All In One POS logo" width={120} height={120} className="h-full w-full rounded-xl object-cover object-center" />
           </div>
           <CardTitle>Set your permanent password</CardTitle>
-          <CardDescription>This temporary password can no longer be used after you continue.</CardDescription>
+          <CardDescription>Choose a new password for your MySQL account.</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={submit} className="space-y-4">
-            <div className="space-y-2"><Label htmlFor="new-password">New password</Label><Input id="new-password" type="password" minLength={6} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" required /></div>
-            <div className="space-y-2"><Label htmlFor="confirm-new-password">Confirm new password</Label><Input id="confirm-new-password" type="password" minLength={6} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" required /></div>
+            <div className="space-y-2"><Label htmlFor="new-password">New password</Label><Input id="new-password" type="password" minLength={10} value={password} onChange={(event) => setPassword(event.target.value)} autoComplete="new-password" required /></div>
+            <div className="space-y-2"><Label htmlFor="confirm-new-password">Confirm new password</Label><Input id="confirm-new-password" type="password" minLength={10} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" required /></div>
             <Button type="submit" className="w-full" disabled={isSaving}>{isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Continue to app</Button>
           </form>
         </CardContent>

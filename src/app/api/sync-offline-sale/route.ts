@@ -4,7 +4,7 @@ import { createSaleAction } from '@/app/actions/sale-actions';
 export async function POST(request: Request) {
   try {
     const payload = await request.json();
-    if (!payload?.idToken || !payload?.idempotencyKey || !payload?.sale || !Array.isArray(payload.items)) {
+    if (!payload?.sessionProof || !payload?.idempotencyKey || !payload?.sale || !Array.isArray(payload.items)) {
       return NextResponse.json({ success: false, error: 'Offline sale payload is incomplete.' }, { status: 400 });
     }
     const result = await createSaleAction(payload);

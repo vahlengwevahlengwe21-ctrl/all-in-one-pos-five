@@ -21,7 +21,7 @@ The application should only enable automatic approval after a provider adapter h
 
 ## Production secrets
 
-Provider secrets belong in a server secret manager or deployment environment, never in Firestore shop settings and never in client-side code. Each adapter must implement idempotency, timeout handling, cancellation, webhook signature verification, settlement reconciliation, and a provider transaction ID on the sale.
+Provider secrets belong in a server secret manager or deployment environment, never in MySQL shop settings and never in client-side code. Each adapter must implement idempotency, timeout handling, cancellation, webhook signature verification, settlement reconciliation, and a provider transaction ID on the sale.
 
 ## PayFast POS subscription setup
 

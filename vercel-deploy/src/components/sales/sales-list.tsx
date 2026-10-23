@@ -21,10 +21,9 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useCollection, useDoc, useFirestore, useUser, useAuth } from '@/firebase';
-import { useMemoFirebase } from '@/firebase/provider';
-import { useSelectedShopContext } from '@/contexts/shop-context';
-import { collection, query, orderBy, doc, limit, where } from 'firebase/firestore';
+import { useCollection, useDoc, useMysql, useUser, useAuth } from '@/auth';
+import { useMemoMysql } from '@/auth/provider';
+import { collection, query, orderBy, doc, limit, where } from '@/lib/mysql-client';
 import type { Sale, SaleItem, UserProfile } from '@/lib/types';
 import { format } from 'date-fns';
 import { Separator } from '../ui/separator';
@@ -46,7 +45,7 @@ import {
 import { Textarea } from '../ui/textarea';
 
 function SaleDetails({ sale, isAdmin }: { sale: Sale; isAdmin: boolean }) {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const auth = useAuth();
   const { toast } = useToast();
   const [isVoiding, setIsVoiding] = useState(false);
@@ -56,21 +55,21 @@ function SaleDetails({ sale, isAdmin }: { sale: Sale; isAdmin: boolean }) {
   const [reason, setReason] = useState('');
   const [refundMethod, setRefundMethod] = useState<'cash' | 'card'>('cash');
   const [returnQuantities, setReturnQuantities] = useState<Record<string, number>>({});
-  const itemsQuery = useMemoFirebase(
+  const itemsQuery = useMemoMysql(
     () =>
-      firestore
-        ? query(collection(firestore, `sales/${sale.id}/items`))
+      mysql
+        ? query(collection(mysql, `sales/${sale.id}/items`))
         : null,
-    [firestore, sale.id]
+    [mysql, sale.id]
   );
   const { data: items, isLoading } = useCollection<SaleItem>(itemsQuery);
 
-  const returnsQuery = useMemoFirebase(
+  const returnsQuery = useMemoMysql(
     () =>
-      firestore
-        ? query(collection(firestore, `sales/${sale.id}/returns`))
+      mysql
+        ? query(collection(mysql, `sales/${sale.id}/returns`))
         : null,
-    [firestore, sale.id]
+    [mysql, sale.id]
   );
   const { data: returns } = useCollection<any>(returnsQuery);
 
@@ -92,9 +91,9 @@ function SaleDetails({ sale, isAdmin }: { sale: Sale; isAdmin: boolean }) {
       return;
     }
 
-    const idToken = await currentUser.getIdToken();
+    const sessionProof = await currentUser.getSessionProof();
 
-    const result = await voidSaleAction({ saleId: sale.id, idToken, reason });
+    const result = await voidSaleAction({ saleId: sale.id, sessionProof, reason });
     setIsVoiding(false);
 
     if (result?.success) {
@@ -120,10 +119,10 @@ function SaleDetails({ sale, isAdmin }: { sale: Sale; isAdmin: boolean }) {
     if (!auth?.currentUser || !items) return;
     setIsReturning(true);
     try {
-      const idToken = await auth.currentUser.getIdToken();
+      const sessionProof = await auth.currentUser.getSessionProof();
       const result = await returnSaleAction({
         saleId: sale.id,
-        idToken,
+        sessionProof,
         reason,
         refundMethod,
         items: Object.entries(returnQuantities).map(([itemId, quantity]) => ({ itemId, quantity })),
@@ -384,11 +383,11 @@ function SaleDetails({ sale, isAdmin }: { sale: Sale; isAdmin: boolean }) {
 }
 
 function SaleAccordionItem({ sale, isAdmin }: { sale: Sale, isAdmin: boolean }) {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   
-  const saleItemsQuery = useMemoFirebase(() => (
-      firestore ? query(collection(firestore, `sales/${sale.id}/items`)) : null
-  ), [firestore, sale.id]);
+  const saleItemsQuery = useMemoMysql(() => (
+      mysql ? query(collection(mysql, `sales/${sale.id}/items`)) : null
+  ), [mysql, sale.id]);
   
   const { data: items } = useCollection(saleItemsQuery);
   const itemCount = items?.length ?? 0;
@@ -424,21 +423,21 @@ function SaleAccordionItem({ sale, isAdmin }: { sale: Sale, isAdmin: boolean }) 
 }
 
 export function SalesList() {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { user } = useUser();
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<'all' | NonNullable<Sale['status']>>('all');
-  const userProfileRef = useMemoFirebase(
-    () => (firestore && user ? doc(firestore, 'users', user.uid) : null),
-    [firestore, user]
+  const userProfileRef = useMemoMysql(
+    () => (mysql && user ? doc(mysql, 'users', user.uid) : null),
+    [mysql, user]
   );
   const { data: userProfile, isLoading: isProfileLoading } = useDoc<UserProfile>(userProfileRef);
 
-  const salesQuery = useMemoFirebase(
-    () => firestore && userProfile?.shopId && userProfile.role !== 'super administrator'
-      ? query(collection(firestore, 'sales'), where('shopId', '==', userProfile.shopId), orderBy('createdAt', 'desc'), limit(50))
+  const salesQuery = useMemoMysql(
+    () => mysql && userProfile?.shopId && userProfile.role !== 'super administrator'
+      ? query(collection(mysql, 'sales'), where('shopId', '==', userProfile.shopId), orderBy('createdAt', 'desc'), limit(50))
       : null,
-    [firestore, userProfile]
+    [mysql, userProfile]
   );
   const { data: sales, isLoading: isLoadingSales } = useCollection<Sale>(salesQuery);
 

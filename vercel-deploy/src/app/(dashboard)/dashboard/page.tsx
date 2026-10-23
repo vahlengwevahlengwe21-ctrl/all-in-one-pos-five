@@ -8,26 +8,29 @@ import {
 } from '@/components/ui/card';
 import { InventoryTable } from '@/components/dashboard/inventory-table';
 import { Package, Archive, AlertCircle, CheckCircle, TrendingUp, WalletCards } from 'lucide-react';
-import { useCollection, useFirestore, useDoc, useUser } from '@/firebase';
-import { useMemoFirebase } from '@/firebase/provider';
-import { collection, query, doc, where } from 'firebase/firestore';
+import { useCollection, useMysql, useDoc, useUser } from '@/auth';
+import { useMemoMysql } from '@/auth/provider';
+import { collection, query, doc, where } from '@/lib/mysql-client';
 import type { UserProfile } from '@/lib/types';
 import type { Product, Sale } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
+import { useSelectedShopContext } from '@/contexts/shop-context';
 
 export default function Dashboard() {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { user } = useUser();
-  const profileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const { selectedShopId, isSuperAdmin } = useSelectedShopContext();
+  const profileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: profile } = useDoc<UserProfile>(profileRef);
-  const productsQuery = useMemoFirebase(
-    () => (firestore && profile?.shopId ? query(collection(firestore, 'products'), where('shopId', '==', profile.shopId)) : null),
-    [firestore, profile?.shopId]
+  const scopedShopId = isSuperAdmin ? selectedShopId || profile?.shopId : profile?.shopId;
+  const productsQuery = useMemoMysql(
+    () => (mysql && scopedShopId ? query(collection(mysql, 'products'), where('shopId', '==', scopedShopId)) : null),
+    [mysql, scopedShopId]
   );
   const { data: products, isLoading } = useCollection<Product>(productsQuery);
-  const salesQuery = useMemoFirebase(
-    () => (firestore && profile?.shopId ? query(collection(firestore, 'sales'), where('shopId', '==', profile.shopId)) : null),
-    [firestore, profile?.shopId]
+  const salesQuery = useMemoMysql(
+    () => (mysql && scopedShopId ? query(collection(mysql, 'sales'), where('shopId', '==', scopedShopId)) : null),
+    [mysql, scopedShopId]
   );
   const { data: sales, isLoading: isLoadingSales } = useCollection<Sale>(salesQuery);
 

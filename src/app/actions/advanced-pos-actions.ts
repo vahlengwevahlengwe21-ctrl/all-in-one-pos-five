@@ -1,14 +1,14 @@
 'use server';
 
-import { initializeFirebaseAdmin } from '@/firebase/server';
-import { FieldValue, Timestamp } from 'firebase-admin/firestore';
+import { initializeMysqlServer } from '@/lib/mysql-auth-server';
+import { FieldValue, Timestamp } from '@/lib/mysql-store';
 import { writeAuditEvent } from '@/lib/audit';
 
-async function requireAuth(idToken: string) {
-  const { auth, firestore } = initializeFirebaseAdmin();
+async function requireAuth(sessionProof: string) {
+  const { auth, mysql } = initializeMysqlServer();
   try {
-    const decodedToken = await auth.verifyIdToken(idToken);
-    const profile = await firestore.collection('users').doc(decodedToken.uid).get();
+    const decodedToken = await auth.verifySessionProof(sessionProof);
+    const profile = await mysql.collection('users').doc(decodedToken.uid).get();
     return { uid: decodedToken.uid, email: decodedToken.email, shopId: profile.data()?.shopId || null, role: profile.data()?.role };
   } catch (error) {
     throw new Error('Unauthorized: Invalid or expired token');
@@ -19,16 +19,16 @@ function requireManager(user: { role?: string }) {
   if (user.role !== 'shop owner' && user.role !== 'super administrator') throw new Error('Only a shop owner can perform this action.');
 }
 
-export async function applyStockCountAction(payload: { idToken: string; items: Array<{ productId: string; actualCount: number }> }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+export async function applyStockCountAction(payload: { sessionProof: string; items: Array<{ productId: string; actualCount: number }> }) {
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
   requireManager(user);
   if (!payload.items.length) throw new Error('No stock count items were supplied.');
   if (payload.items.some((item) => !Number.isInteger(item.actualCount) || item.actualCount < 0)) throw new Error('Stock counts must be non-negative whole numbers.');
   const uniqueItems = new Map(payload.items.map((item) => [item.productId, item.actualCount]));
   const changes: Array<{ productId: string; before: number; after: number; variance: number }> = [];
-  await firestore.runTransaction(async (transaction) => {
-    const productSnapshots = await Promise.all(Array.from(uniqueItems.keys()).map((productId) => transaction.get(firestore.collection('products').doc(productId))));
+  await mysql.runTransaction(async (transaction) => {
+    const productSnapshots = await Promise.all(Array.from(uniqueItems.keys()).map((productId) => transaction.get(mysql.collection('products').doc(productId))));
     productSnapshots.forEach((snapshot) => {
       if (!snapshot.exists || snapshot.data()?.shopId !== user.shopId) throw new Error('A stock-count product does not belong to this shop.');
       const before = Number(snapshot.data()?.stock || 0);
@@ -37,30 +37,30 @@ export async function applyStockCountAction(payload: { idToken: string; items: A
       const threshold = Number(snapshot.data()?.threshold || 0);
       transaction.update(snapshot.ref, { stock: after, status: after > threshold ? 'In Stock' : after > 0 ? 'Low Stock' : 'Out of Stock' });
     });
-    const movementRef = firestore.collection('inventory_transactions').doc();
+    const movementRef = mysql.collection('inventory_transactions').doc();
     transaction.set(movementRef, { type: 'stock_count', shopId: user.shopId, lines: changes, createdAt: Timestamp.now(), createdBy: { uid: user.uid, email: user.email || null } });
   });
-  await writeAuditEvent(firestore, { action: 'inventory.stock_count_applied', actorId: user.uid, actorName: user.email, shopId: user.shopId, entityType: 'inventory', entityId: 'stock-count', details: { itemCount: changes.length, changedItems: changes.filter((change) => change.variance !== 0).length } });
+  await writeAuditEvent(mysql, { action: 'inventory.stock_count_applied', actorId: user.uid, actorName: user.email, shopId: user.shopId, entityType: 'inventory', entityId: 'stock-count', details: { itemCount: changes.length, changedItems: changes.filter((change) => change.variance !== 0).length } });
   return { success: true, updatedCount: changes.length };
 }
 
 // ============== CUSTOMER MANAGEMENT ==============
 
 export async function createCustomerAction(payload: {
-  idToken: string;
+  sessionProof: string;
   name: string;
   phone?: string;
   email?: string;
   address?: string;
   notes?: string;
 }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
   if (user.role !== 'shop owner' && user.role !== 'sales' && user.role !== 'super administrator') throw new Error('Your account cannot create customers.');
 
   try {
-    const customersRef = firestore.collection('customers');
-    const userProfile = await firestore.collection('users').doc(user.uid).get();
+    const customersRef = mysql.collection('customers');
+    const userProfile = await mysql.collection('users').doc(user.uid).get();
     const docRef = await customersRef.add({
       name: payload.name,
       phone: payload.phone || null,
@@ -81,7 +81,7 @@ export async function createCustomerAction(payload: {
 }
 
 export async function updateCustomerAction(payload: {
-  idToken: string;
+  sessionProof: string;
   customerId: string;
   name?: string;
   phone?: string;
@@ -89,11 +89,11 @@ export async function updateCustomerAction(payload: {
   address?: string;
   notes?: string;
 }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
 
   try {
-    const customerRef = firestore.collection('customers').doc(payload.customerId);
+    const customerRef = mysql.collection('customers').doc(payload.customerId);
     const customerSnapshot = await customerRef.get();
     if (!customerSnapshot.exists || customerSnapshot.data()?.shopId !== user.shopId) throw new Error('Customer does not belong to this shop.');
     const updates: any = {};
@@ -111,16 +111,16 @@ export async function updateCustomerAction(payload: {
 }
 
 export async function addLoyaltyPointsAction(payload: {
-  idToken: string;
+  sessionProof: string;
   customerId: string;
   points: number;
 }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
   requireManager(user);
 
   try {
-    const customerRef = firestore.collection('customers').doc(payload.customerId);
+    const customerRef = mysql.collection('customers').doc(payload.customerId);
     const customerSnapshot = await customerRef.get();
     if (!customerSnapshot.exists || customerSnapshot.data()?.shopId !== user.shopId) throw new Error('Customer does not belong to this shop.');
     if (!Number.isInteger(payload.points) || payload.points <= 0) throw new Error('Loyalty points must be a positive whole number.');
@@ -136,16 +136,16 @@ export async function addLoyaltyPointsAction(payload: {
 // ============== FAVORITES MANAGEMENT ==============
 
 export async function addFavoriteAction(payload: {
-  idToken: string;
+  sessionProof: string;
   productId: string;
   productName: string;
   productSku: string;
 }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
 
   try {
-    const favoritesRef = firestore.collection(`users/${user.uid}/favorites`);
+    const favoritesRef = mysql.collection(`users/${user.uid}/favorites`);
     
     // Check if already favorited
     const existing = await favoritesRef.where('productId', '==', payload.productId).get();
@@ -167,14 +167,14 @@ export async function addFavoriteAction(payload: {
 }
 
 export async function removeFavoriteAction(payload: {
-  idToken: string;
+  sessionProof: string;
   productId: string;
 }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
 
   try {
-    const favoritesRef = firestore.collection(`users/${user.uid}/favorites`);
+    const favoritesRef = mysql.collection(`users/${user.uid}/favorites`);
     const docs = await favoritesRef.where('productId', '==', payload.productId).get();
     
     for (const doc of docs.docs) {
@@ -190,20 +190,20 @@ export async function removeFavoriteAction(payload: {
 // ============== CASH DRAWER MANAGEMENT ==============
 
 export async function openCashDrawerAction(payload: {
-  idToken: string;
+  sessionProof: string;
   openingBalance: number;
 }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
 
   try {
     if (!Number.isFinite(payload.openingBalance) || payload.openingBalance < 0) throw new Error('Opening balance must be a valid non-negative amount.');
     // Get user profile for name
-    const userDoc = await firestore.collection('users').doc(user.uid).get();
+    const userDoc = await mysql.collection('users').doc(user.uid).get();
     const userData = userDoc.data();
     const salespersonName = userData ? `${userData.name} ${userData.surname}` : 'Unknown';
 
-    const drawerRef = await firestore.collection('cash_drawers').add({
+    const drawerRef = await mysql.collection('cash_drawers').add({
       salespersonId: user.uid,
       salespersonName,
       shopId: user.shopId,
@@ -219,17 +219,17 @@ export async function openCashDrawerAction(payload: {
 }
 
 export async function closeCashDrawerAction(payload: {
-  idToken: string;
+  sessionProof: string;
   drawerId: string;
   closingBalance: number;
   notes?: string;
 }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
 
   try {
     if (!Number.isFinite(payload.closingBalance) || payload.closingBalance < 0) throw new Error('Closing balance must be a valid non-negative amount.');
-    const drawerRef = firestore.collection('cash_drawers').doc(payload.drawerId);
+    const drawerRef = mysql.collection('cash_drawers').doc(payload.drawerId);
     const drawerSnap = await drawerRef.get();
     const drawer = drawerSnap.data();
 
@@ -258,7 +258,7 @@ export async function closeCashDrawerAction(payload: {
 // ============== DISCOUNT APPLICATION ==============
 
 export async function createDiscountAction(payload: {
-  idToken: string;
+  sessionProof: string;
   name: string;
   description?: string;
   type: 'percentage' | 'fixed' | 'bulk';
@@ -270,15 +270,15 @@ export async function createDiscountAction(payload: {
   startDate?: Date;
   endDate?: Date;
 }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
   requireManager(user);
 
   try {
     if (!payload.name.trim()) throw new Error('Discount name is required.');
     if (!Number.isFinite(payload.value) || payload.value < 0 || (payload.type === 'percentage' && payload.value > 100)) throw new Error('Discount value is invalid.');
     if (payload.type === 'bulk' && (!Number.isInteger(payload.bulkMinQty) || (payload.bulkMinQty || 0) < 1)) throw new Error('Bulk discounts require a valid minimum quantity.');
-    const discountRef = await firestore.collection('discounts').add({
+    const discountRef = await mysql.collection('discounts').add({
       name: payload.name,
       description: payload.description || null,
       type: payload.type,
@@ -301,15 +301,15 @@ export async function createDiscountAction(payload: {
 }
 
 export async function validatePromoCodeAction(payload: {
-  idToken: string;
+  sessionProof: string;
   promoCode: string;
   subtotal: number;
 }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
 
   try {
-    const discountsSnap = await firestore
+    const discountsSnap = await mysql
       .collection('discounts')
       .where('promoCode', '==', payload.promoCode)
       .where('shopId', '==', user.shopId)
@@ -347,14 +347,14 @@ export async function validatePromoCodeAction(payload: {
 // ============== STORE CREDIT ==============
 
 export async function createStoreCreditAction(payload: {
-  idToken: string;
+  sessionProof: string;
   customerId?: string;
   initialAmount: number;
   type: 'store_credit' | 'gift_card';
   expiresAt?: Date;
 }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
   requireManager(user);
 
   try {
@@ -362,7 +362,7 @@ export async function createStoreCreditAction(payload: {
     // Generate unique code
     const code = `SC-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
 
-    const creditRef = await firestore.collection('store_credits').add({
+    const creditRef = await mysql.collection('store_credits').add({
       code,
       customerId: payload.customerId || null,
       balance: payload.initialAmount,
@@ -382,16 +382,16 @@ export async function createStoreCreditAction(payload: {
 }
 
 export async function validateStoreCreditAction(payload: {
-  idToken: string;
+  sessionProof: string;
   code: string;
   amount: number;
 }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
 
   try {
     if (!Number.isFinite(payload.amount) || payload.amount <= 0) throw new Error('Credit redemption amount must be greater than zero.');
-    const creditsSnap = await firestore
+    const creditsSnap = await mysql
       .collection('store_credits')
       .where('code', '==', payload.code)
       .where('shopId', '==', user.shopId)
@@ -422,7 +422,7 @@ export async function validateStoreCreditAction(payload: {
 // ============== LAYAWAY ==============
 
 export async function createLayawayAction(payload: {
-  idToken: string;
+  sessionProof: string;
   customerId: string;
   customerName: string;
   items: Array<{
@@ -434,8 +434,8 @@ export async function createLayawayAction(payload: {
   scheduledPickupDate?: Date;
   notes?: string;
 }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
   requireManager(user);
 
   try {
@@ -443,7 +443,7 @@ export async function createLayawayAction(payload: {
     if (payload.items.some((item) => !Number.isInteger(item.quantity) || item.quantity < 1 || !Number.isFinite(item.price) || item.price < 0)) throw new Error('Layaway item values are invalid.');
     const totalAmount = payload.items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-    const layawayRef = await firestore.collection('layaways').add({
+    const layawayRef = await mysql.collection('layaways').add({
       customerId: payload.customerId,
       customerName: payload.customerName,
       items: payload.items,
@@ -465,17 +465,17 @@ export async function createLayawayAction(payload: {
 }
 
 export async function makeLayawayPaymentAction(payload: {
-  idToken: string;
+  sessionProof: string;
   layawayId: string;
   paymentAmount: number;
 }) {
-  const { firestore } = initializeFirebaseAdmin();
-  const user = await requireAuth(payload.idToken);
+  const { mysql } = initializeMysqlServer();
+  const user = await requireAuth(payload.sessionProof);
   requireManager(user);
 
   try {
     if (!Number.isFinite(payload.paymentAmount) || payload.paymentAmount <= 0) throw new Error('Layaway payment must be greater than zero.');
-    const layawayRef = firestore.collection('layaways').doc(payload.layawayId);
+    const layawayRef = mysql.collection('layaways').doc(payload.layawayId);
     const layawaySnap = await layawayRef.get();
     const layaway = layawaySnap.data();
 

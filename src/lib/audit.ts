@@ -1,5 +1,5 @@
-import type { Firestore } from 'firebase-admin/firestore';
-import { Timestamp } from 'firebase-admin/firestore';
+import type { MysqlStore } from '@/lib/mysql-store';
+import { Timestamp } from '@/lib/mysql-store';
 
 type AuditEvent = {
   action: string;
@@ -11,8 +11,8 @@ type AuditEvent = {
   details?: Record<string, unknown>;
 };
 
-export async function writeAuditEvent(firestore: Firestore, event: AuditEvent) {
-  await firestore.collection('audit_logs').add({
+export async function writeAuditEvent(mysql: MysqlStore, event: AuditEvent) {
+  await mysql.collection('audit_logs').add({
     ...event,
     createdAt: Timestamp.now(),
   });

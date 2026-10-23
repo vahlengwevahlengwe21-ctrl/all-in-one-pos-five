@@ -1,22 +1,19 @@
 
 'use server';
 
-import { randomBytes } from 'crypto';
-import { initializeFirebaseAdmin } from '@/firebase/server';
+import { initializeMysqlServer } from '@/lib/mysql-auth-server';
 
-const PROTECTED_SUPER_ADMIN_EMAIL = 'jeff@gmail.com';
-
-function isProtectedSuperAdmin(email?: string | null, role?: string) {
-  return email?.trim().toLowerCase() === PROTECTED_SUPER_ADMIN_EMAIL || role === 'super administrator';
+function isProtectedSuperAdmin(role?: string) {
+  return role === 'super administrator';
 }
 
-async function requireAdmin(idToken: string) {
-  const { auth, firestore } = initializeFirebaseAdmin();
-  if (!idToken) throw new Error('Authentication token is missing.');
-  const decoded = await auth.verifyIdToken(idToken);
-  const role = await firestore.collection('roles_admin').doc(decoded.uid).get();
+async function requireAdmin(sessionProof: string) {
+  const { auth, mysql } = initializeMysqlServer();
+  if (!sessionProof) throw new Error('Authentication token is missing.');
+  const decoded = await auth.verifySessionProof(sessionProof);
+  const role = await mysql.collection('roles_admin').doc(decoded.uid).get();
   if (!role.exists) throw new Error('Only shop owners and the super administrator can manage users.');
-  return { auth, firestore };
+  return { auth, mysql };
 }
 
 interface CreateUserPayload {
@@ -25,47 +22,45 @@ interface CreateUserPayload {
   surname: string;
   role: 'shop owner' | 'sales';
   displayName?: string;
-  idToken: string;
+  sessionProof: string;
   shopId?: string;
+  password: string;
 }
 
 export async function createUserAction(
   payload: CreateUserPayload
 ): Promise<{ success: boolean; uid?: string; error?: string }> {
   try {
-    const { auth: adminAuth, firestore } = await requireAdmin(payload.idToken);
-    const decoded = await adminAuth.verifyIdToken(payload.idToken);
-    const creatorProfile = await firestore.collection('users').doc(decoded.uid).get();
+    const { auth: adminAuth, mysql } = await requireAdmin(payload.sessionProof);
+    const decoded = await adminAuth.verifySessionProof(payload.sessionProof);
+    const creatorProfile = await mysql.collection('users').doc(decoded.uid).get();
     const creatorData = creatorProfile.data();
     const shopId = creatorData?.role === 'shop owner' ? creatorData.shopId : payload.shopId;
     if (creatorData?.role === 'shop owner' && (!shopId || payload.shopId !== shopId)) {
       throw new Error('Shop owners can only add users to their own shop.');
     }
     if (shopId) {
-      const shop = await firestore.collection('shops').doc(shopId).get();
+      const shop = await mysql.collection('shops').doc(shopId).get();
       const maxUsersAllowed = shop.data()?.maxUsersAllowed;
       if (!shop.exists || !Number.isInteger(maxUsersAllowed) || maxUsersAllowed < 1) {
         throw new Error('Shop subscription is not configured.');
       }
-      const users = await firestore.collection('users').where('shopId', '==', shopId).get();
+      const users = await mysql.collection('users').where('shopId', '==', shopId).get();
       if (users.size >= maxUsersAllowed) {
         throw new Error(`This shop has reached its limit of ${maxUsersAllowed} user accounts.`);
       }
     }
-    const { idToken: _idToken, ...userToCreate } = payload;
-
     const userRecord = await adminAuth.createUser({
-      email: userToCreate.email,
-      displayName: userToCreate.displayName,
-      // The user replaces this server-generated password through the reset email.
-      password: randomBytes(32).toString('base64url'),
+      email: payload.email,
+      displayName: payload.displayName,
+      password: payload.password,
     });
 
     try {
       const now = new Date();
-      const profileRef = firestore.collection('users').doc(userRecord.uid);
-      const roleRef = firestore.collection('roles_admin').doc(userRecord.uid);
-      await firestore.runTransaction(async (transaction) => {
+      const profileRef = mysql.collection('users').doc(userRecord.uid);
+      const roleRef = mysql.collection('roles_admin').doc(userRecord.uid);
+      await mysql.runTransaction(async (transaction) => {
         transaction.create(profileRef, {
           id: userRecord.uid,
           name: payload.name.trim(),
@@ -73,6 +68,7 @@ export async function createUserAction(
           email: payload.email.trim().toLowerCase(),
           role: payload.role,
           shopId: shopId || null,
+          mustChangePassword: true,
           createdAt: now,
         });
         if (payload.role === 'shop owner') {
@@ -90,8 +86,7 @@ export async function createUserAction(
     if (error.code === 'auth/email-already-exists') {
       errorMessage = 'A user with this email address already exists.';
     } else if (error.code === 'auth/invalid-password') {
-      errorMessage =
-        'The password must be a string with at least six characters.';
+      errorMessage = 'The password must contain at least 10 characters.';
     } else if (error.code === 'auth/invalid-phone-number') {
         errorMessage = 'The phone number must be a valid E.164 standard compliant identifier (e.g., +11234567890).';
     } else if (error.message) {
@@ -104,40 +99,24 @@ export async function createUserAction(
   }
 }
 
-/**
- * Deletes a user from Firebase Authentication and their associated data in Firestore.
- * This is a server action and should only be called from a trusted client environment
- * by an authorized administrator. Security is enforced by Firestore rules restricting
- * who can trigger this action.
- *
- * @param userId The UID of the user to delete.
- * @returns A promise that resolves to an object indicating success or failure.
- */
 export async function deleteUserAction(
-  payload: { userId: string; idToken: string }
+  payload: { userId: string; sessionProof: string }
 ): Promise<{ success: boolean; error?: string }> {
   try {
-    const { auth: adminAuth, firestore: adminFirestore } = await requireAdmin(payload.idToken);
+    const { auth: adminAuth, mysql: adminMysql } = await requireAdmin(payload.sessionProof);
     const { userId } = payload;
 
-    const [targetAuth, targetProfile] = await Promise.all([
-      adminAuth.getUser(userId),
-      adminFirestore.collection('users').doc(userId).get(),
-    ]);
-    if (isProtectedSuperAdmin(targetAuth.email, targetProfile.data()?.role)) {
+    await adminAuth.getUser(userId);
+    const targetProfile = await adminMysql.collection('users').doc(userId).get();
+    if (isProtectedSuperAdmin(targetProfile.data()?.role)) {
       throw new Error('The protected super administrator cannot be deleted.');
     }
     
-    // Step 1: Delete from Firebase Authentication
     await adminAuth.deleteUser(userId);
-
-    // Step 2: Delete from 'users' collection in Firestore
-    const userDocRef = adminFirestore.collection('users').doc(userId);
+    const userDocRef = adminMysql.collection('users').doc(userId);
     await userDocRef.delete();
 
-    // Step 3: Delete from 'roles_admin' collection if they are an admin
-    // It's safe to attempt deletion even if the document doesn't exist.
-    const adminRoleDocRef = adminFirestore.collection('roles_admin').doc(userId);
+    const adminRoleDocRef = adminMysql.collection('roles_admin').doc(userId);
     await adminRoleDocRef.delete();
 
     return { success: true };
@@ -154,10 +133,11 @@ export async function deleteUserAction(
 
 interface UpdateUserPayload {
   userId: string;
-  idToken: string;
+  sessionProof: string;
   name: string;
   surname: string;
   role: 'shop owner' | 'super administrator' | 'sales';
+  password?: string;
 }
 
 export async function updateUserAction(
@@ -166,32 +146,33 @@ export async function updateUserAction(
   const { userId, name, surname, role } = payload;
 
   try {
-    const { auth: adminAuth, firestore: adminFirestore } = await requireAdmin(payload.idToken);
+    const { auth: adminAuth, mysql: adminMysql } = await requireAdmin(payload.sessionProof);
     if (role === 'super administrator') {
       throw new Error('Only the protected super administrator account may have this role.');
     }
 
-    const [targetAuth, targetProfile] = await Promise.all([
-      adminAuth.getUser(userId),
-      adminFirestore.collection('users').doc(userId).get(),
-    ]);
-    if (isProtectedSuperAdmin(targetAuth.email, targetProfile.data()?.role)) {
+    await adminAuth.getUser(userId);
+    const targetProfile = await adminMysql.collection('users').doc(userId).get();
+    if (isProtectedSuperAdmin(targetProfile.data()?.role)) {
       throw new Error('The protected super administrator cannot be changed.');
     }
     
-    const userDocRef = adminFirestore.collection('users').doc(userId);
-    const adminRoleDocRef = adminFirestore.collection('roles_admin').doc(userId);
+    const userDocRef = adminMysql.collection('users').doc(userId);
+    const adminRoleDocRef = adminMysql.collection('roles_admin').doc(userId);
 
-    // Update display name in Firebase Auth
+    if (payload.password !== undefined && payload.password.length < 10) {
+      throw new Error('Password must contain at least 10 characters.');
+    }
     await adminAuth.updateUser(userId, {
       displayName: `${name} ${surname}`,
+      ...(payload.password ? { password: payload.password, revokeSessions: true } : {}),
     });
 
-    // Update user profile in Firestore
     await userDocRef.update({
       name,
       surname,
       role,
+      ...(payload.password ? { mustChangePassword: true } : {}),
     });
 
     // Manage admin role in the roles_admin collection
@@ -214,18 +195,16 @@ export async function updateUserAction(
 }
 
 export async function completePasswordSetupAction(payload: {
-  idToken: string;
+  sessionProof: string;
   password: string;
 }) {
   try {
-    const { auth, firestore } = initializeFirebaseAdmin();
-    if (!payload.idToken) throw new Error('Authentication token is missing.');
-    const decoded = await auth.verifyIdToken(payload.idToken);
-    if (payload.password.length < 6) throw new Error('Password must be at least 6 characters.');
-    const targetAuth = await auth.getUser(decoded.uid);
-    if (isProtectedSuperAdmin(targetAuth.email)) throw new Error('The protected super administrator cannot change password here.');
+    const { auth, mysql } = initializeMysqlServer();
+    if (!payload.sessionProof) throw new Error('Authentication token is missing.');
+    const decoded = await auth.verifySessionProof(payload.sessionProof);
+    if (payload.password.length < 10) throw new Error('Password must contain at least 10 characters.');
     await auth.updateUser(decoded.uid, { password: payload.password });
-    await firestore.collection('users').doc(decoded.uid).update({ mustChangePassword: false });
+    await mysql.collection('users').doc(decoded.uid).update({ mustChangePassword: false });
     return { success: true };
   } catch (error: any) {
     return { success: false, error: error.message || 'Unable to update password.' };

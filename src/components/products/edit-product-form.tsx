@@ -27,8 +27,8 @@ import { useToast } from '@/hooks/use-toast';
 import { Loader2, Upload } from 'lucide-react';
 import { useState } from 'react';
 import Image from 'next/image';
-import { useFirestore, updateDocumentNonBlocking } from '@/firebase';
-import { doc } from 'firebase/firestore';
+import { useMysql, updateDocumentNonBlocking } from '@/auth';
+import { doc } from '@/lib/mysql-client';
 import type { Product } from '@/lib/types';
 import { useRouter } from 'next/navigation';
 
@@ -60,7 +60,7 @@ export function EditProductForm({ product }: EditProductFormProps) {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [imagePreview, setImagePreview] = useState<string | null>(product.imageUrl || null);
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const router = useRouter();
 
   const form = useForm<FormData>({
@@ -100,18 +100,18 @@ export function EditProductForm({ product }: EditProductFormProps) {
   async function onSubmit(data: FormData) {
     setIsLoading(true);
 
-    if (!firestore) {
+    if (!mysql) {
       toast({
         variant: 'destructive',
         title: 'Error',
-        description: 'Firestore is not initialized.',
+        description: 'The MySQL data service is not initialized.',
       });
       setIsLoading(false);
       return;
     }
 
     try {
-      const productRef = doc(firestore, 'products', product.id);
+      const productRef = doc(mysql, 'products', product.id);
       const { image, ...productData } = data;
       
       const finalBaseProductSku = productData.baseProductSku || productData.sku;

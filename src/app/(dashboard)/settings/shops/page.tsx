@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { Store, RotateCcw, Copy, Loader2 } from 'lucide-react';
-import { useAuth, useUser } from '@/firebase';
+import { useAuth, useUser } from '@/auth';
 import { useToast } from '@/hooks/use-toast';
 import {
   createShopAction,
@@ -41,7 +41,7 @@ export default function ShopsPage() {
     }
     setIsLoading(true);
     try {
-      const result = await listShopsAction({ idToken: await user.getIdToken() });
+      const result = await listShopsAction({ sessionProof: await user.getSessionProof() });
       if (result.success) {
         const nextShops = result.shops as Shop[];
         setShops(nextShops);
@@ -68,7 +68,7 @@ export default function ShopsPage() {
 
   const loadSeats = async (shopId: string) => {
     if (!user || !shopId) return;
-    const result = await listDeviceSeatsAction({ shopId, idToken: await user.getIdToken() });
+    const result = await listDeviceSeatsAction({ shopId, sessionProof: await user.getSessionProof() });
     if (result.success) setSeats(result.seats as DeviceSeat[]);
     else toast({ variant: 'destructive', title: 'Unable to load devices', description: result.error });
   };
@@ -80,7 +80,7 @@ export default function ShopsPage() {
     if (!user) return;
     setIsSaving(true);
     const result = await createShopAction({
-      idToken: await user.getIdToken(),
+      sessionProof: await user.getSessionProof(),
       shopId: form.shopId,
       shopName: form.shopName,
       ownerEmail: form.ownerEmail,
@@ -100,21 +100,21 @@ export default function ShopsPage() {
 
   const handleReset = async (seatId: string) => {
     if (!auth?.currentUser || !window.confirm('Reset this device seat? The current computer will need to register again.')) return;
-    const result = await resetDeviceAction({ seatId, idToken: await auth.currentUser.getIdToken() });
+    const result = await resetDeviceAction({ seatId, sessionProof: await auth.currentUser.getSessionProof() });
     if (result.success) { await loadSeats(selectedShopId); toast({ title: 'Device seat reset' }); }
     else toast({ variant: 'destructive', title: 'Reset failed', description: result.error });
   };
 
   const handleUnlock = async () => {
     if (!auth?.currentUser || !selectedShopId) return;
-    const result = await unlockShopTerminalsAction({ shopId: selectedShopId, idToken: await auth.currentUser.getIdToken() });
+    const result = await unlockShopTerminalsAction({ shopId: selectedShopId, sessionProof: await auth.currentUser.getSessionProof() });
     if (result.success) toast({ title: 'Shop unlocked', description: 'All recently connected terminals received a new seven-day lease.' });
     else toast({ variant: 'destructive', title: 'Shop remains locked', description: result.error });
   };
 
   const handleMarkPaid = async () => {
     if (!auth?.currentUser || !selectedShopId) return;
-    const result = await markShopPaidAction({ shopId: selectedShopId, idToken: await auth.currentUser.getIdToken() });
+    const result = await markShopPaidAction({ shopId: selectedShopId, sessionProof: await auth.currentUser.getSessionProof() });
     if (result.success && result.billingExpiresAt) {
       await loadShops();
       toast({ title: 'Monthly payment recorded', description: `Billing is active until ${new Date(result.billingExpiresAt).toLocaleDateString()}.` });
@@ -123,7 +123,7 @@ export default function ShopsPage() {
 
   const handleRegenerateToken = async () => {
     if (!auth?.currentUser || !selectedShopId) return;
-    const result = await regenerateActivationTokenAction({ shopId: selectedShopId, idToken: await auth.currentUser.getIdToken() });
+    const result = await regenerateActivationTokenAction({ shopId: selectedShopId, sessionProof: await auth.currentUser.getSessionProof() });
     if (result.success) {
       setActivationTokens((currentTokens) => ({ ...currentTokens, [selectedShopId]: result.activationToken || '' }));
       toast({ title: 'Activation token generated', description: 'Use this token on the replacement PC within 24 hours.' });
@@ -141,7 +141,7 @@ export default function ShopsPage() {
               <div className="space-y-2"><Label htmlFor="shop-id">Shop ID</Label><Input id="shop-id" value={form.shopId} onChange={(e) => setForm({ ...form, shopId: e.target.value })} placeholder="shop-001" required /></div>
               <div className="space-y-2"><Label htmlFor="shop-name">Shop name</Label><Input id="shop-name" value={form.shopName} onChange={(e) => setForm({ ...form, shopName: e.target.value })} required /></div>
               <div className="space-y-2"><Label htmlFor="owner-email">Shop owner email</Label><Input id="owner-email" type="email" value={form.ownerEmail} onChange={(e) => setForm({ ...form, ownerEmail: e.target.value })} required /></div>
-              <div className="space-y-2"><Label htmlFor="owner-temporary-password">Temporary password</Label><Input id="owner-temporary-password" type="password" minLength={6} value={form.ownerTemporaryPassword} onChange={(e) => setForm({ ...form, ownerTemporaryPassword: e.target.value })} required /><p className="text-xs text-muted-foreground">Give this temporary password to the shop owner securely. They must replace it at first login.</p></div>
+              <div className="space-y-2"><Label htmlFor="owner-temporary-password">Temporary password</Label><Input id="owner-temporary-password" type="password" minLength={10} value={form.ownerTemporaryPassword} onChange={(e) => setForm({ ...form, ownerTemporaryPassword: e.target.value })} required /><p className="text-xs text-muted-foreground">Give this temporary password to the shop owner securely. They must replace it at first login.</p></div>
               <div className="space-y-2"><Label htmlFor="user-limit">User limit</Label><Input id="user-limit" type="number" min="1" max="100" value={form.maxUsersAllowed} onChange={(e) => setForm({ ...form, maxUsersAllowed: e.target.value })} required /></div>
               <div className="space-y-2"><Label htmlFor="device-limit">Package PC limit</Label><Input id="device-limit" type="number" min="1" value={form.maxDevicesAllowed} onChange={(e) => setForm({ ...form, maxDevicesAllowed: e.target.value })} required /></div>
               <Button type="submit" className="w-full" disabled={isSaving}>{isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create Shop</Button>

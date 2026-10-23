@@ -14,7 +14,7 @@ import { PlusCircle, Star } from 'lucide-react';
 import type { Product } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { useAuth } from '@/firebase';
+import { useAuth } from '@/auth';
 import { addFavoriteAction } from '@/app/actions/advanced-pos-actions';
 import { useToast } from '@/hooks/use-toast';
 
@@ -46,9 +46,9 @@ export function PosProductList({
   const addFavorite = async (product: Product) => {
     if (!auth?.currentUser) return;
     try {
-      const idToken = await auth.currentUser.getIdToken();
+      const sessionProof = await auth.currentUser.getSessionProof();
       const result = await addFavoriteAction({
-        idToken,
+        sessionProof,
         productId: product.id,
         productName: product.name,
         productSku: product.sku,

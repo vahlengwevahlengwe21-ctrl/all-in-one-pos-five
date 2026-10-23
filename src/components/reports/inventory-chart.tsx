@@ -21,9 +21,9 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from '@/components/ui/chart';
-import { useCollection, useFirestore, useDoc, useUser } from '@/firebase';
-import { useMemoFirebase } from '@/firebase/provider';
-import { collection, query, doc, where } from 'firebase/firestore';
+import { useCollection, useMysql, useDoc, useUser } from '@/auth';
+import { useMemoMysql } from '@/auth/provider';
+import { collection, query, doc, where } from '@/lib/mysql-client';
 import type { UserProfile } from '@/lib/types';
 import type { Product } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -40,13 +40,13 @@ const MIN_HEIGHT = 400; // Minimum height for the chart in pixels
 const ITEM_HEIGHT = 35; // Height per item in pixels
 
 export function InventoryChart() {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { user } = useUser();
-  const profileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const profileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: profile } = useDoc<UserProfile>(profileRef);
-  const productsQuery = useMemoFirebase(
-    () => (firestore && profile?.shopId ? query(collection(firestore, 'products'), where('shopId', '==', profile.shopId)) : null),
-    [firestore, profile?.shopId]
+  const productsQuery = useMemoMysql(
+    () => (mysql && profile?.shopId ? query(collection(mysql, 'products'), where('shopId', '==', profile.shopId)) : null),
+    [mysql, profile?.shopId]
   );
   const { data: products, isLoading } = useCollection<Product>(productsQuery);
 

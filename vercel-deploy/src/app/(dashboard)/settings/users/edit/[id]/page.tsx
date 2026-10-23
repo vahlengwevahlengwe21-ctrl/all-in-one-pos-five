@@ -1,8 +1,8 @@
 'use client';
 import { useParams } from 'next/navigation';
-import { useDoc, useFirestore } from '@/firebase';
-import { doc } from 'firebase/firestore';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useDoc, useMysql } from '@/auth';
+import { doc } from '@/lib/mysql-client';
+import { useMemoMysql } from '@/auth/provider';
 import type { UserProfile } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -11,11 +11,11 @@ import { EditUserForm } from '@/components/settings/edit-user-form';
 export default function EditUserPage() {
   const params = useParams();
   const { id } = params;
-  const firestore = useFirestore();
+  const mysql = useMysql();
 
-  const userRef = useMemoFirebase(
-    () => (firestore && id ? doc(firestore, 'users', id as string) : null),
-    [firestore, id]
+  const userRef = useMemoMysql(
+    () => (mysql && id ? doc(mysql, 'users', id as string) : null),
+    [mysql, id]
   );
   const { data: user, isLoading } = useDoc<UserProfile>(userRef);
 

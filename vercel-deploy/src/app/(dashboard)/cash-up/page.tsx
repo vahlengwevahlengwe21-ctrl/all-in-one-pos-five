@@ -1,13 +1,14 @@
 'use client';
 
 import { useMemo, type ElementType } from 'react';
-import { useDoc, useFirestore, useCollection, useMemoFirebase, useUser } from '@/firebase';
-import { collection, doc, query, where } from 'firebase/firestore';
+import { useDoc, useMysql, useCollection, useMemoMysql, useUser } from '@/auth';
+import { collection, doc, query, where } from '@/lib/mysql-client';
 import type { Sale, UserProfile } from '@/lib/types';
 import { startOfToday, startOfWeek, startOfMonth, endOfToday, endOfWeek, endOfMonth, isWithinInterval } from 'date-fns';
 import { Loader2, User, Ban, Users } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
+import { useSelectedShopContext } from '@/contexts/shop-context';
 import {
   Accordion,
   AccordionContent,
@@ -91,21 +92,23 @@ const PeriodSection = ({ title, stats }: { title: string; stats: PaymentStats })
   );
 
 export default function CashUpPage() {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { user } = useUser();
-  const profileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const { selectedShopId, isSuperAdmin } = useSelectedShopContext();
+  const profileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: profile } = useDoc<UserProfile>(profileRef);
+  const scopedShopId = isSuperAdmin ? selectedShopId || profile?.shopId : profile?.shopId;
 
-  const salesQuery = useMemoFirebase(() => {
-    if (!firestore || !profile) return null;
-    return profile.role === 'super administrator' ? query(collection(firestore, 'sales')) : profile.shopId ? query(collection(firestore, 'sales'), where('shopId', '==', profile.shopId)) : null;
-  }, [firestore, profile]);
+  const salesQuery = useMemoMysql(() => {
+    if (!mysql || !profile || !scopedShopId) return null;
+    return query(collection(mysql, 'sales'), where('shopId', '==', scopedShopId));
+  }, [mysql, profile, scopedShopId]);
   const { data: sales, isLoading: salesLoading } = useCollection<Sale>(salesQuery);
   
-  const usersQuery = useMemoFirebase(() => {
-    if (!firestore || !profile) return null;
-    return profile.role === 'super administrator' ? query(collection(firestore, 'users')) : profile.shopId ? query(collection(firestore, 'users'), where('shopId', '==', profile.shopId)) : null;
-  }, [firestore, profile]);
+  const usersQuery = useMemoMysql(() => {
+    if (!mysql || !profile || !scopedShopId) return null;
+    return query(collection(mysql, 'users'), where('shopId', '==', scopedShopId));
+  }, [mysql, profile, scopedShopId]);
   const { data: users, isLoading: usersLoading } = useCollection<UserProfile>(usersQuery);
 
   const salespersonTotals: SalespersonTotals = useMemo(() => {

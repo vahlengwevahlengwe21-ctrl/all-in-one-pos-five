@@ -1,10 +1,10 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { collection, doc, query, where } from 'firebase/firestore';
+import { collection, doc, query, where } from '@/lib/mysql-client';
 import { Pie, PieChart, ResponsiveContainer, Tooltip, Cell } from 'recharts';
-import { useCollection, useDoc, useFirestore, useUser } from '@/firebase';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useCollection, useDoc, useMysql, useUser } from '@/auth';
+import { useMemoMysql } from '@/auth/provider';
 import type { Product, SaleItem, UserProfile } from '@/lib/types';
 import { useSelectedShopContext } from '@/contexts/shop-context';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -47,17 +47,17 @@ const dateValue = (createdAt: SaleItem['createdAt']) => {
 const money = (value: number) => `R${value.toLocaleString('en-ZA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export function AdvancedReport() {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { user } = useUser();
   const { selectedShopId, isSuperAdmin } = useSelectedShopContext();
-  const profileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const profileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: profile } = useDoc<UserProfile>(profileRef);
   const scopedShopId = isSuperAdmin ? selectedShopId || profile?.shopId : profile?.shopId;
-  const productsQuery = useMemoFirebase(() => {
-    if (!firestore || !profile || !scopedShopId) return null;
-    return query(collection(firestore, 'products'), where('shopId', '==', scopedShopId));
-  }, [firestore, profile, scopedShopId]);
-  const saleItemsQuery = useMemoFirebase(() => {
+  const productsQuery = useMemoMysql(() => {
+    if (!mysql || !profile || !scopedShopId) return null;
+    return query(collection(mysql, 'products'), where('shopId', '==', scopedShopId));
+  }, [mysql, profile, scopedShopId]);
+  const saleItemsQuery = useMemoMysql(() => {
     return null;
   }, []);
   const { data: products, isLoading: productsLoading } = useCollection<ReportProduct>(productsQuery);

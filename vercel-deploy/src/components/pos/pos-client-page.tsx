@@ -3,19 +3,15 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { useCollection, useFirestore, useUser, useDoc, useAuth } from '@/firebase';
+import { useCollection, useMysql, useUser, useDoc, useAuth } from '@/auth';
 import {
   collection,
   query,
   doc,
-  runTransaction,
   Timestamp,
   where,
-  getDocs,
-  DocumentReference,
-  DocumentSnapshot,
-} from 'firebase/firestore';
-import { useMemoFirebase } from '@/firebase/provider';
+} from '@/lib/mysql-client';
+import { useMemoMysql } from '@/auth/provider';
 import type { PaymentProvider, Product, Sale, Shop, UserProfile } from '@/lib/types';
 import { PosProductList } from './pos-product-list';
 import { PosCart } from './pos-cart';
@@ -63,33 +59,33 @@ type HeldCart = {
 };
 
 export function PosClientPage() {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { user } = useUser();
   const auth = useAuth();
-  const userProfileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const userProfileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: userProfile, isLoading: isLoadingProfile } = useDoc<UserProfile>(userProfileRef);
   const [shop, setShop] = useState<Shop | null>(null);
   const [cardProvider, setCardProvider] = useState<PaymentProvider>('manual_terminal');
   const [stockAlerts, setStockAlerts] = useState<StockAlertItem[]>([]);
   const { toast } = useToast();
-  const productsQuery = useMemoFirebase(
+  const productsQuery = useMemoMysql(
     () => {
-      if (!firestore) return null;
+      if (!mysql) return null;
       return userProfile?.shopId
-        ? query(collection(firestore, 'products'), where('shopId', '==', userProfile.shopId))
+        ? query(collection(mysql, 'products'), where('shopId', '==', userProfile.shopId))
         : null;
     },
-    [firestore, userProfile?.shopId]
+    [mysql, userProfile?.shopId]
   );
   const { data: products, isLoading: isLoadingProducts } = useCollection<Product>(productsQuery);
   const activeProducts = products?.filter((product) => !product.isArchived);
 
   useEffect(() => {
     if (!user || !userProfile?.shopId) return;
-    user.getIdToken().then(async (idToken) => {
-      const result = await getShopProfileAction({ idToken, shopId: userProfile.shopId! });
+    user.getSessionProof().then(async (sessionProof) => {
+      const result = await getShopProfileAction({ sessionProof, shopId: userProfile.shopId! });
       if (result.success) setShop(result.shop as Shop);
-      const paymentSettings = await getShopPaymentSettingsAction({ idToken, shopId: userProfile.shopId! });
+      const paymentSettings = await getShopPaymentSettingsAction({ sessionProof, shopId: userProfile.shopId! });
       if (paymentSettings.success && paymentSettings.settings?.enabled) setCardProvider(paymentSettings.settings.provider as PaymentProvider);
     });
   }, [user, userProfile?.shopId]);
@@ -246,7 +242,7 @@ export function PosClientPage() {
       'id' | 'createdAt' | 'salespersonId' | 'salespersonName'
     >
   ) => {
-    if (!firestore || !user || !userProfile) {
+    if (!mysql || !user || !userProfile) {
       toast({
         variant: 'destructive',
         title: 'Error',
@@ -268,9 +264,9 @@ export function PosClientPage() {
     try {
       const currentUser = auth?.currentUser;
       if (!currentUser) throw new Error('Authentication is not ready. Please sign in again.');
-      const idToken = await currentUser.getIdToken(false);
+      const sessionProof = await currentUser.getSessionProof(false);
       const result = await createSaleAction({
-        idToken,
+        sessionProof,
         sale: { ...saleDetails, shopId: userProfile.shopId },
         items: cart.map((item) => ({
           productId: item.product.id,
@@ -316,7 +312,7 @@ export function PosClientPage() {
           const idempotencyKey = crypto.randomUUID();
           await electronApi.saveOfflineSale({
             idempotencyKey,
-            idToken: await auth.currentUser.getIdToken(false),
+            sessionProof: await auth.currentUser.getSessionProof(false),
             sale: { ...saleDetails, shopId: userProfile.shopId },
             items: cart.map((item) => ({
               productId: item.product.id,
@@ -400,7 +396,7 @@ export function PosClientPage() {
           />
           <div className="flex flex-col gap-4">
             <QuickAccess
-              onAddToCart={(productId, productName) => {
+              onAddToCart={(productId) => {
                 const product = activeProducts?.find((p) => p.id === productId);
                 if (product) addToCart(product, product.price || 0);
               }}

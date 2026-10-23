@@ -114,7 +114,7 @@ export type UserProfile = {
   hiddenFromUserList?: boolean;
   shopId?: string;
   mustChangePassword?: boolean;
-  createdAt: any; // Firestore timestamp
+  createdAt: any; // Mysql timestamp
 }
 
 export type Shop = {

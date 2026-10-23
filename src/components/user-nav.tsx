@@ -2,8 +2,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useAuth, useUser, useFirestore, useDoc } from '@/firebase';
-import { signOut } from 'firebase/auth';
+import { useUser, useMysql, useDoc } from '@/auth';
+import { initiateSignOut } from '@/auth/non-blocking-login';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import {
@@ -15,27 +15,25 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import { useMemoFirebase } from '@/firebase/provider';
-import { doc } from 'firebase/firestore';
+import { useMemoMysql } from '@/auth/provider';
+import { doc } from '@/lib/mysql-client';
 import type { UserProfile } from '@/lib/types';
 import { Badge } from './ui/badge';
 
 export function UserNav() {
   const { user, isUserLoading } = useUser();
-  const auth = useAuth();
-  const firestore = useFirestore();
+  const mysql = useMysql();
 
-  const userProfileRef = useMemoFirebase(
-    () => (firestore && user ? doc(firestore, 'users', user.uid) : null),
-    [firestore, user]
+  const userProfileRef = useMemoMysql(
+    () => (mysql && user ? doc(mysql, 'users', user.uid) : null),
+    [mysql, user]
   );
   const { data: userProfile, isLoading: isProfileLoading } =
     useDoc<UserProfile>(userProfileRef);
 
-  const handleLogout = () => {
-    if (!auth) return;
+  const handleLogout = async () => {
     try {
-      signOut(auth);
+      await initiateSignOut();
     } catch (e) {
       console.error('Failed to sign out:', e);
     }

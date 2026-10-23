@@ -15,13 +15,13 @@ import { Button } from '@/components/ui/button';
 import { PlusCircle, Trash2, Edit, Search, ArchiveRestore } from 'lucide-react';
 import {
   useCollection,
-  useFirestore,
+  useMysql,
   updateDocumentNonBlocking,
   useUser,
-} from '@/firebase';
-import { useMemoFirebase } from '@/firebase/provider';
-import { collection, query, doc, where } from 'firebase/firestore';
-import { useDoc } from '@/firebase';
+} from '@/auth';
+import { useMemoMysql } from '@/auth/provider';
+import { collection, query, doc, where } from '@/lib/mysql-client';
+import { useDoc } from '@/auth';
 import type { UserProfile } from '@/lib/types';
 import type { Product } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -38,18 +38,19 @@ import {
 import { useState } from 'react';
 import { useToast } from '@/hooks/use-toast';
 import { Input } from '@/components/ui/input';
+import { useSelectedShopContext } from '@/contexts/shop-context';
 
 export default function ProductsPage() {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { user, isUserLoading } = useUser();
-  const profileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const { selectedShopId, isSuperAdmin } = useSelectedShopContext();
+  const profileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: profile } = useDoc<UserProfile>(profileRef);
-  const productsQuery = useMemoFirebase(() => {
-    if (!firestore || !profile) return null;
-    return profile.role === 'super administrator'
-      ? query(collection(firestore, 'products'))
-      : profile.shopId ? query(collection(firestore, 'products'), where('shopId', '==', profile.shopId)) : null;
-  }, [firestore, profile]);
+  const scopedShopId = isSuperAdmin ? selectedShopId || profile?.shopId : profile?.shopId;
+  const productsQuery = useMemoMysql(() => {
+    if (!mysql || !profile) return null;
+    return scopedShopId ? query(collection(mysql, 'products'), where('shopId', '==', scopedShopId)) : null;
+  }, [mysql, profile, scopedShopId]);
   const { data: products, isLoading } = useCollection<Product>(productsQuery);
   const { toast } = useToast();
 
@@ -63,8 +64,8 @@ export default function ProductsPage() {
   };
 
   const handleConfirmDelete = () => {
-    if (productToDelete && firestore && user) {
-      const productRef = doc(firestore, 'products', productToDelete.id);
+    if (productToDelete && mysql && user) {
+      const productRef = doc(mysql, 'products', productToDelete.id);
       updateDocumentNonBlocking(productRef, { isArchived: true });
       toast({
         title: 'Product Deleted',
@@ -81,8 +82,8 @@ export default function ProductsPage() {
   };
 
   const handleRestore = (product: Product) => {
-    if (!firestore) return;
-    updateDocumentNonBlocking(doc(firestore, 'products', product.id), { isArchived: false });
+    if (!mysql) return;
+    updateDocumentNonBlocking(doc(mysql, 'products', product.id), { isArchived: false });
     toast({ title: 'Product restored', description: `${product.name} is active in the catalog again.` });
   };
 

@@ -1,9 +1,9 @@
 'use client';
 
-import { useState, useCallback, useMemo } from 'react';
-import { useFirestore, useCollection, useDoc, useUser } from '@/firebase';
-import { collection, query, where, doc } from 'firebase/firestore';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useState, useMemo } from 'react';
+import { useMysql, useCollection, useDoc, useUser } from '@/auth';
+import { collection, query, where, doc } from '@/lib/mysql-client';
+import { useMemoMysql } from '@/auth/provider';
 import type { Customer, UserProfile } from '@/lib/types';
 import {
   Dialog,
@@ -15,10 +15,9 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Search, Plus, User } from 'lucide-react';
+import { Search, Plus } from 'lucide-react';
 import { Skeleton } from '@/components/ui/skeleton';
 
 interface CustomerLookupProps {
@@ -34,20 +33,20 @@ export function CustomerLookup({
   onSelectCustomer,
   onCreateNew,
 }: CustomerLookupProps) {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { user } = useUser();
-  const profileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const profileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: profile } = useDoc<UserProfile>(profileRef);
   const [searchTerm, setSearchTerm] = useState('');
 
-  const customersQuery = useMemoFirebase(
+  const customersQuery = useMemoMysql(
     () =>
-      firestore
+      mysql
         ? profile?.shopId
-          ? query(collection(firestore, 'customers'), where('shopId', '==', profile.shopId))
-          : query(collection(firestore, 'customers'))
+          ? query(collection(mysql, 'customers'), where('shopId', '==', profile.shopId))
+          : query(collection(mysql, 'customers'))
         : null,
-    [firestore, profile?.shopId]
+    [mysql, profile?.shopId]
   );
 
   const { data: allCustomers, isLoading } = useCollection<Customer>(customersQuery);

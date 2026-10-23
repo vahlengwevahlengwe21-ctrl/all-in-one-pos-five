@@ -4,9 +4,9 @@ import { useEffect, useState } from 'react';
 import { SidebarTrigger } from '@/components/ui/sidebar';
 import { UserNav } from '@/components/user-nav';
 import { Badge } from '@/components/ui/badge';
-import { useAuth, useDoc, useFirestore, useUser } from '@/firebase';
-import { useMemoFirebase } from '@/firebase/provider';
-import { doc } from 'firebase/firestore';
+import { useAuth, useDoc, useMysql, useUser } from '@/auth';
+import { useMemoMysql } from '@/auth/provider';
+import { doc } from '@/lib/mysql-client';
 import type { UserProfile } from '@/lib/types';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useSelectedShopContext } from '@/contexts/shop-context';
@@ -17,11 +17,11 @@ export function Header() {
   const [status, setStatus] = useState<HeaderStatus>('Online');
   const auth = useAuth();
   const { user } = useUser();
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { shops, selectedShopId, setSelectedShopId, isLoading: shopsLoading, isSuperAdmin } = useSelectedShopContext();
-  const profileRef = useMemoFirebase(
-    () => (firestore && user ? doc(firestore, 'users', user.uid) : null),
-    [firestore, user]
+  const profileRef = useMemoMysql(
+    () => (mysql && user ? doc(mysql, 'users', user.uid) : null),
+    [mysql, user]
   );
   const { data: profile } = useDoc<UserProfile>(profileRef);
 
@@ -38,7 +38,7 @@ export function Header() {
           ? terminal.online ? 'Online - Locked' : 'Offline - Locked'
           : terminal.online ? 'Online' : 'Offline');
         if (terminal.online && terminal.lockState === 'unlocked' && window.electronAPI.syncOfflineSales && auth?.currentUser) {
-          await window.electronAPI.syncOfflineSales({ idToken: await auth.currentUser.getIdToken(true) });
+          await window.electronAPI.syncOfflineSales({ sessionProof: await auth.currentUser.getSessionProof(true) });
         }
         return;
       }

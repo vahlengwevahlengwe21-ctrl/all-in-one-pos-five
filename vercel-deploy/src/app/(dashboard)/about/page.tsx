@@ -2,7 +2,7 @@ import { BookOpenCheck, Cloud, LockKeyhole, MonitorSmartphone, ShieldCheck } fro
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 const safeguards = [
-  { icon: LockKeyhole, title: 'Protected access', text: 'Firebase authentication and shop-scoped permissions keep each shop separated from every other shop.' },
+  { icon: LockKeyhole, title: 'Protected access', text: 'MySQL authentication and shop-scoped permissions keep each shop separated from every other shop.' },
   { icon: MonitorSmartphone, title: 'Registered terminals', text: 'Electron terminals use a local activation record and server verification before opening the POS.' },
   { icon: Cloud, title: 'Cloud plus offline continuity', text: 'Online sales sync to the cloud. The desktop shell can queue an offline sale for later synchronization.' },
   { icon: ShieldCheck, title: 'Account controls', text: 'Billing status, device seats, audit events, and shop administration are controlled from protected server actions.' },

@@ -12,10 +12,9 @@ import {
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
 import { useToast } from '@/hooks/use-toast';
 import { validatePromoCodeAction } from '@/app/actions/advanced-pos-actions';
-import { useAuth } from '@/firebase';
+import { useAuth } from '@/auth';
 import { Loader2, Tag, Percent, DollarSign } from 'lucide-react';
 
 interface DiscountApplierProps {
@@ -85,9 +84,9 @@ export function DiscountApplier({
 
     setIsLoading(true);
     try {
-      const idToken = await auth.currentUser.getIdToken();
+      const sessionProof = await auth.currentUser.getSessionProof();
       const result = await validatePromoCodeAction({
-        idToken,
+        sessionProof,
         promoCode: promoCode.trim(),
         subtotal,
       });

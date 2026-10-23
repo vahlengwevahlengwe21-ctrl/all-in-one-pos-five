@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { listAuditEventsAction } from '@/app/actions/shop-actions';
-import { useUser } from '@/firebase';
+import { useUser } from '@/auth';
 import { useToast } from '@/hooks/use-toast';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,7 +20,7 @@ export function AuditLog() {
   const loadEvents = async () => {
     if (!user) return;
     setIsLoading(true);
-    const result = await listAuditEventsAction({ idToken: await user.getIdToken() });
+    const result = await listAuditEventsAction({ sessionProof: await user.getSessionProof() });
     if (result.success) setEvents(result.events as AuditEvent[]);
     else toast({ variant: 'destructive', title: 'Unable to load audit log', description: result.error });
     setIsLoading(false);

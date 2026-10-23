@@ -1,69 +1,77 @@
-require('dotenv/config');
+require('dotenv').config({ path: '.env.local' });
+require('dotenv').config();
 
-const { cert, getApps, initializeApp } = require('firebase-admin/app');
-const { getAuth } = require('firebase-admin/auth');
-const { getFirestore, Timestamp } = require('firebase-admin/firestore');
+const { randomBytes, scrypt: scryptCallback } = require('node:crypto');
+const { promisify } = require('node:util');
+const { createMysqlPool, readMysqlRecord, writeMysqlRecord } = require('./mysql-support.cjs');
 
-const email = 'jeff@gmail.com';
-const password = process.env.SUPER_ADMIN_PASSWORD;
+const scrypt = promisify(scryptCallback);
+const expectedSuperAdminEmail = 'jeff@gmail.com';
+const password = process.env.MYSQL_SUPER_ADMIN_PASSWORD;
 
-if (!password) {
-  throw new Error('Set SUPER_ADMIN_PASSWORD before running this script.');
+if (!password || password.length < 10) {
+  throw new Error('Set MYSQL_SUPER_ADMIN_PASSWORD to a password of at least 10 characters.');
 }
-
-if (!getApps().length) {
-  initializeApp({
-    credential: cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    }),
-  });
-}
-
-const auth = getAuth();
-const firestore = getFirestore();
 
 async function main() {
-  let userRecord;
-
+  const pool = createMysqlPool(1);
+  const connection = await pool.getConnection();
   try {
-    userRecord = await auth.getUserByEmail(email);
-    userRecord = await auth.updateUser(userRecord.uid, {
-      password,
-      displayName: 'Jeff Super Administrator',
-    });
-  } catch (error) {
-    if (error.code !== 'auth/user-not-found') throw error;
-    userRecord = await auth.createUser({
-      email,
-      password,
-      displayName: 'Jeff Super Administrator',
-    });
+    await connection.execute(
+      `CREATE TABLE IF NOT EXISTS auth_login_attempts (
+        attempt_key char(64) NOT NULL PRIMARY KEY,
+        failed_attempts int unsigned NOT NULL DEFAULT 0,
+        window_started_at timestamp(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+        KEY idx_auth_login_window (window_started_at)
+      ) ENGINE=InnoDB`,
+    );
+    const [roles] = await connection.execute(
+      "SELECT path FROM app_records WHERE path LIKE 'roles_super_admin/%'",
+    );
+    if (roles.length !== 1) {
+      throw new Error(`Expected one existing super administrator role, found ${roles.length}.`);
+    }
+    const userId = roles[0].path.slice('roles_super_admin/'.length);
+    const profilePath = `users/${userId}`;
+    const profile = await readMysqlRecord(connection, profilePath);
+    if (!profile?.email) throw new Error('The existing super administrator profile has no email address.');
+
+    const email = String(profile.email).trim().toLowerCase();
+    if (email !== expectedSuperAdminEmail) {
+      throw new Error('The existing super administrator role is not assigned to the requested account.');
+    }
+    const salt = randomBytes(16).toString('hex');
+    const hash = (await scrypt(password, salt, 64)).toString('hex');
+
+    await connection.beginTransaction();
+    try {
+      await connection.execute(
+        `INSERT INTO user_credentials (user_id, email, password_hash, password_salt)
+         VALUES (?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE email = VALUES(email), password_hash = VALUES(password_hash), password_salt = VALUES(password_salt)`,
+        [userId, email, hash, salt],
+      );
+      await writeMysqlRecord(connection, profilePath, {
+        role: 'super administrator',
+        hiddenFromUserList: true,
+        mustChangePassword: true,
+      });
+      await connection.execute('DELETE FROM app_sessions WHERE user_id = ?', [userId]);
+      await writeMysqlRecord(connection, `roles_admin/${userId}`, {});
+      await writeMysqlRecord(connection, `roles_super_admin/${userId}`, {});
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    }
+    console.log('MySQL super administrator credentials are configured. Sign in with the existing account email and change this password after the first login.');
+  } finally {
+    connection.release();
+    await pool.end();
   }
-
-  const profileRef = firestore.collection('users').doc(userRecord.uid);
-  const existingProfile = await profileRef.get();
-  await profileRef.set(
-    {
-      name: 'Jeff',
-      surname: 'Super Administrator',
-      email,
-      role: 'super administrator',
-      hiddenFromUserList: true,
-      createdAt: existingProfile.exists
-        ? existingProfile.get('createdAt')
-        : Timestamp.now(),
-    },
-    { merge: true }
-  );
-
-  await firestore.collection('roles_admin').doc(userRecord.uid).set({});
-  await firestore.collection('roles_super_admin').doc(userRecord.uid).set({});
-  console.log(`Super administrator ready: ${email} (${userRecord.uid})`);
 }
 
-main().catch((error) => {
-  console.error(error.message);
+main().catch(error => {
+  console.error('Unable to configure MySQL super administrator:', error.message);
   process.exitCode = 1;
 });

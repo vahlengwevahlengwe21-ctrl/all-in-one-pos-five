@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { getShopProfileAction, updateShopProfileAction } from '@/app/actions/shop-actions';
-import { useDoc, useFirestore, useUser } from '@/firebase';
-import { doc } from 'firebase/firestore';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useDoc, useMysql, useUser } from '@/auth';
+import { doc } from '@/lib/mysql-client';
+import { useMemoMysql } from '@/auth/provider';
 import type { UserProfile } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -14,16 +14,16 @@ import { Label } from '@/components/ui/label';
 
 export function ShopProfileForm() {
   const { user } = useUser();
-  const firestore = useFirestore();
-  const userProfileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const mysql = useMysql();
+  const userProfileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: userProfile } = useDoc<UserProfile>(userProfileRef);
   const { toast } = useToast();
   const [shopId, setShopId] = useState('');
   const [form, setForm] = useState({ shopName: '', address: '', phone: '', website: '' });
   const [isSaving, setIsSaving] = useState(false);
 
-  const loadProfile = async (idToken: string, currentShopId: string) => {
-    const result = await getShopProfileAction({ idToken, shopId: currentShopId });
+  const loadProfile = async (sessionProof: string, currentShopId: string) => {
+    const result = await getShopProfileAction({ sessionProof, shopId: currentShopId });
     if (result.success && result.shop) {
       setShopId(result.shop.id);
       setForm({ shopName: result.shop.shopName, address: result.shop.address || '', phone: result.shop.phone || '', website: result.shop.website || '' });
@@ -32,14 +32,14 @@ export function ShopProfileForm() {
 
   useEffect(() => {
     if (!user || !userProfile?.shopId) return;
-    user.getIdToken().then((idToken) => loadProfile(idToken, userProfile.shopId!));
+    user.getSessionProof().then((sessionProof) => loadProfile(sessionProof, userProfile.shopId!));
   }, [user, userProfile?.shopId]);
 
   const handleSave = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!user || !shopId) return;
     setIsSaving(true);
-    const result = await updateShopProfileAction({ idToken: await user.getIdToken(), shopId, ...form });
+    const result = await updateShopProfileAction({ sessionProof: await user.getSessionProof(), shopId, ...form });
     setIsSaving(false);
     toast(result.success ? { title: 'Shop profile saved' } : { variant: 'destructive', title: 'Unable to save profile', description: result.error });
   };

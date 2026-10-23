@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useAuth } from '@/firebase';
+import { useAuth } from '@/auth';
 import { createCustomerAction } from '@/app/actions/advanced-pos-actions';
 import type { Customer } from '@/lib/types';
 import {
@@ -50,7 +50,7 @@ export function CustomerForm({ open, onOpenChange, onCreated }: CustomerFormProp
     setIsSaving(true);
     try {
       const result = await createCustomerAction({
-        idToken: await auth.currentUser.getIdToken(),
+        sessionProof: await auth.currentUser.getSessionProof(),
         name: name.trim(),
         phone: phone.trim() || undefined,
         email: email.trim() || undefined,

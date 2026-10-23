@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react';
 import { getShopPaymentSettingsAction, updateShopPaymentSettingsAction } from '@/app/actions/shop-actions';
-import { useDoc, useFirestore, useUser } from '@/firebase';
-import { doc } from 'firebase/firestore';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useDoc, useMysql, useUser } from '@/auth';
+import { doc } from '@/lib/mysql-client';
+import { useMemoMysql } from '@/auth/provider';
 import type { PaymentProvider, ShopPaymentSettings, UserProfile } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -25,8 +25,8 @@ const providers: Array<{ value: PaymentProvider; label: string; description: str
 
 export function PaymentSettingsForm() {
   const { user } = useUser();
-  const firestore = useFirestore();
-  const profileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const mysql = useMysql();
+  const profileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: profile } = useDoc<UserProfile>(profileRef);
   const { toast } = useToast();
   const [shopId, setShopId] = useState('');
@@ -35,8 +35,8 @@ export function PaymentSettingsForm() {
 
   useEffect(() => {
     if (!user || !profile?.shopId) return;
-    user.getIdToken().then(async (idToken) => {
-      const result = await getShopPaymentSettingsAction({ idToken, shopId: profile.shopId! });
+    user.getSessionProof().then(async (sessionProof) => {
+      const result = await getShopPaymentSettingsAction({ sessionProof, shopId: profile.shopId! });
       if (result.success && result.settings) {
         const settings = result.settings as ShopPaymentSettings;
         setShopId(settings.shopId);
@@ -51,7 +51,7 @@ export function PaymentSettingsForm() {
     event.preventDefault();
     if (!user || !shopId) return;
     setIsSaving(true);
-    const result = await updateShopPaymentSettingsAction({ idToken: await user.getIdToken(), shopId, ...form });
+    const result = await updateShopPaymentSettingsAction({ sessionProof: await user.getSessionProof(), shopId, ...form });
     setIsSaving(false);
     toast(result.success ? { title: 'Payment method saved' } : { variant: 'destructive', title: 'Unable to save payment method', description: result.error });
   };

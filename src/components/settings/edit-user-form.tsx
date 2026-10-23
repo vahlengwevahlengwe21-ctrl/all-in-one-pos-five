@@ -4,8 +4,7 @@ import { useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { useFirestore, useDoc, useUser, useAuth } from '@/firebase';
-import { doc } from 'firebase/firestore';
+import { useUser, useAuth } from '@/auth';
 import { updateUserAction } from '@/app/actions/user-actions';
 
 import { Button } from '@/components/ui/button';
@@ -35,16 +34,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { useMemoFirebase } from '@/firebase/provider';
 import type { UserProfile } from '@/lib/types';
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert';
-
-const PROTECTED_SUPER_ADMIN_EMAIL = 'jeff@gmail.com';
 
 const formSchema = z.object({
   name: z.string().min(1, 'Name is required'),
   surname: z.string().min(1, 'Surname is required'),
   role: z.enum(['shop owner', 'super administrator', 'sales']),
+  password: z.string().optional(),
 });
 
 type FormData = z.infer<typeof formSchema>;
@@ -66,20 +63,22 @@ export function EditUserForm({ user }: EditUserFormProps) {
       name: user.name,
       surname: user.surname,
       role: user.role,
+      password: '',
     },
   });
 
   const isEditingSelf = currentUser?.uid === user.id;
   const isProtectedSuperAdmin =
-    user.email.toLowerCase() === PROTECTED_SUPER_ADMIN_EMAIL || user.role === 'super administrator';
+    user.role === 'super administrator';
 
   async function onSubmit(data: FormData) {
     setIsLoading(true);
     try {
       const result = await updateUserAction({
         userId: user.id,
-        idToken: auth?.currentUser ? await auth.currentUser.getIdToken() : '',
+        sessionProof: auth?.currentUser ? await auth.currentUser.getSessionProof() : '',
         ...data,
+        password: data.password || undefined,
       });
 
       if (!result.success) {
@@ -165,6 +164,19 @@ export function EditUserForm({ user }: EditUserFormProps) {
                       </SelectItem>
                     </SelectContent>
                   </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="password"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Reset password (optional)</FormLabel>
+                  <FormControl>
+                    <Input type="password" minLength={10} placeholder="Leave blank to keep the current password" {...field} autoComplete="new-password" />
+                  </FormControl>
                   <FormMessage />
                 </FormItem>
               )}

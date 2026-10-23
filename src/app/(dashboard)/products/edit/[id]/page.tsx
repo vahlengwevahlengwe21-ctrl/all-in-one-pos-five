@@ -1,9 +1,9 @@
 'use client';
 import { useParams } from 'next/navigation';
 import { EditProductForm } from '@/components/products/edit-product-form';
-import { useDoc, useFirestore } from '@/firebase';
-import { doc } from 'firebase/firestore';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useDoc, useMysql } from '@/auth';
+import { doc } from '@/lib/mysql-client';
+import { useMemoMysql } from '@/auth/provider';
 import { Product } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
@@ -11,11 +11,11 @@ import { Card, CardContent, CardHeader } from '@/components/ui/card';
 export default function EditProductPage() {
   const params = useParams();
   const { id } = params;
-  const firestore = useFirestore();
+  const mysql = useMysql();
 
-  const productRef = useMemoFirebase(
-    () => (firestore && id ? doc(firestore, 'products', id as string) : null),
-    [firestore, id]
+  const productRef = useMemoMysql(
+    () => (mysql && id ? doc(mysql, 'products', id as string) : null),
+    [mysql, id]
   );
   const { data: product, isLoading } = useDoc<Product>(productRef);
 

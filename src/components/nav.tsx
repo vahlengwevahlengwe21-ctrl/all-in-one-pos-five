@@ -36,9 +36,9 @@ import {
 } from '@/components/ui/collapsible';
 import { ChevronRight } from 'lucide-react';
 import { useState } from 'react';
-import { useDoc, useFirestore, useUser } from '@/firebase';
-import { useMemoFirebase } from '@/firebase/provider';
-import { doc } from 'firebase/firestore';
+import { useDoc, useMysql, useUser } from '@/auth';
+import { useMemoMysql } from '@/auth/provider';
+import { doc } from '@/lib/mysql-client';
 import { UserProfile } from '@/lib/types';
 import { Skeleton } from './ui/skeleton';
 
@@ -74,11 +74,11 @@ export function Nav() {
   });
 
   const { user, isUserLoading } = useUser();
-  const firestore = useFirestore();
+  const mysql = useMysql();
 
-  const userProfileRef = useMemoFirebase(
-    () => (firestore && user ? doc(firestore, 'users', user.uid) : null),
-    [firestore, user]
+  const userProfileRef = useMemoMysql(
+    () => (mysql && user ? doc(mysql, 'users', user.uid) : null),
+    [mysql, user]
   );
   const { data: userProfile, isLoading: isProfileLoading } = useDoc<UserProfile>(userProfileRef);
 

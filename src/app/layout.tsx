@@ -3,7 +3,7 @@ import { PT_Sans } from 'next/font/google';
 import './globals.css';
 import { Toaster } from '@/components/ui/toaster';
 import { SidebarProvider } from '@/components/ui/sidebar';
-import { FirebaseClientProvider } from '@/firebase/client-provider';
+import { AuthClientProvider } from '@/auth/client-provider';
 import { ServiceWorkerRegistration } from '@/components/service-worker-registration';
 import { ShopProvider } from '@/contexts/shop-context';
 
@@ -43,14 +43,14 @@ export default function RootLayout({
       </head>
       <body className={`${ptSans.variable} font-body antialiased`}>
         <ServiceWorkerRegistration />
-        <FirebaseClientProvider>
+        <AuthClientProvider>
           <ShopProvider>
             <SidebarProvider>
               {children}
               <Toaster />
             </SidebarProvider>
           </ShopProvider>
-        </FirebaseClientProvider>
+        </AuthClientProvider>
       </body>
     </html>
   );

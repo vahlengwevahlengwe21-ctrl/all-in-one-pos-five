@@ -11,9 +11,9 @@ import {
 } from '@/components/ui/sidebar';
 import { Header } from '@/components/header';
 import { Nav } from '@/components/nav';
-import { useDoc, useFirestore, useUser } from '@/firebase';
-import { doc } from 'firebase/firestore';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useDoc, useMysql, useUser } from '@/auth';
+import { doc } from '@/lib/mysql-client';
+import { useMemoMysql } from '@/auth/provider';
 import type { UserProfile } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -25,13 +25,13 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const { user, isUserLoading } = useUser();
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const pathname = usePathname();
   const router = useRouter();
   const [isElectron, setIsElectron] = useState<boolean | null>(null);
-  const userProfileRef = useMemoFirebase(
-    () => (firestore && user ? doc(firestore, 'users', user.uid) : null),
-    [firestore, user]
+  const userProfileRef = useMemoMysql(
+    () => (mysql && user ? doc(mysql, 'users', user.uid) : null),
+    [mysql, user]
   );
   const { data: userProfile, isLoading: isProfileLoading } = useDoc<UserProfile>(userProfileRef);
   const { shops, selectedShopId, setSelectedShopId, isLoading: shopsLoading, isSuperAdmin: hasShopContextSuperAdmin } = useSelectedShopContext();

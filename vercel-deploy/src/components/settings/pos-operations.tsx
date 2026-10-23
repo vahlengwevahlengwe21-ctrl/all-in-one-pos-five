@@ -1,9 +1,9 @@
 'use client';
 
 import { useState } from 'react';
-import { useAuth, useCollection, useDoc, useFirestore, useUser } from '@/firebase';
-import { collection, doc, query, where } from 'firebase/firestore';
-import { useMemoFirebase } from '@/firebase/provider';
+import { useAuth, useCollection, useDoc, useMysql, useUser } from '@/auth';
+import { collection, doc, query, where } from '@/lib/mysql-client';
+import { useMemoMysql } from '@/auth/provider';
 import type { UserProfile } from '@/lib/types';
 import type { CashDrawer, Customer, Discount, Layaway, StoreCredit } from '@/lib/types';
 import {
@@ -25,9 +25,9 @@ import { Separator } from '@/components/ui/separator';
 const money = (value?: number) => `R${(value || 0).toFixed(2)}`;
 
 export function PosOperations() {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { user } = useUser();
-  const profileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const profileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: profile } = useDoc<UserProfile>(profileRef);
   const auth = useAuth();
   const { toast } = useToast();
@@ -53,21 +53,21 @@ export function PosOperations() {
   const [closingDrawerId, setClosingDrawerId] = useState('');
   const [closingBalance, setClosingBalance] = useState('');
 
-  const shopQuery = (name: string) => firestore && profile?.shopId ? query(collection(firestore, name), where('shopId', '==', profile.shopId)) : null;
-  const customersQuery = useMemoFirebase(() => shopQuery('customers'), [firestore, profile?.shopId]);
-  const discountsQuery = useMemoFirebase(() => shopQuery('discounts'), [firestore, profile?.shopId]);
-  const creditsQuery = useMemoFirebase(() => shopQuery('store_credits'), [firestore, profile?.shopId]);
-  const layawaysQuery = useMemoFirebase(() => shopQuery('layaways'), [firestore, profile?.shopId]);
-  const drawersQuery = useMemoFirebase(() => shopQuery('cash_drawers'), [firestore, profile?.shopId]);
+  const shopQuery = (name: string) => mysql && profile?.shopId ? query(collection(mysql, name), where('shopId', '==', profile.shopId)) : null;
+  const customersQuery = useMemoMysql(() => shopQuery('customers'), [mysql, profile?.shopId]);
+  const discountsQuery = useMemoMysql(() => shopQuery('discounts'), [mysql, profile?.shopId]);
+  const creditsQuery = useMemoMysql(() => shopQuery('store_credits'), [mysql, profile?.shopId]);
+  const layawaysQuery = useMemoMysql(() => shopQuery('layaways'), [mysql, profile?.shopId]);
+  const drawersQuery = useMemoMysql(() => shopQuery('cash_drawers'), [mysql, profile?.shopId]);
   const { data: customers } = useCollection<Customer>(customersQuery);
   const { data: discounts } = useCollection<Discount>(discountsQuery);
   const { data: credits } = useCollection<StoreCredit>(creditsQuery);
   const { data: layaways } = useCollection<Layaway>(layawaysQuery);
   const { data: drawers } = useCollection<CashDrawer>(drawersQuery);
 
-  const withToken = async <T extends { success: boolean; error?: string }>(callback: (idToken: string) => Promise<T>) => {
+  const withToken = async <T extends { success: boolean; error?: string }>(callback: (sessionProof: string) => Promise<T>) => {
     if (!auth?.currentUser) throw new Error('You must be signed in.');
-    const result = await callback(await auth.currentUser.getIdToken());
+    const result = await callback(await auth.currentUser.getSessionProof());
     if (!result.success) throw new Error(result.error || 'The operation was not completed.');
     return result;
   };
@@ -117,11 +117,11 @@ export function PosOperations() {
             </div>
             <div className="flex flex-wrap gap-2">
               <Button disabled={busy || !selectedCustomerId || !customerName} onClick={() => run(async () => {
-                await withToken((idToken) => updateCustomerAction({ idToken, customerId: selectedCustomerId, name: customerName, phone: customerPhone }));
+                await withToken((sessionProof) => updateCustomerAction({ sessionProof, customerId: selectedCustomerId, name: customerName, phone: customerPhone }));
               }, 'Customer updated')}>Save customer</Button>
               <Input className="w-32" type="number" min="1" placeholder="Points" value={loyaltyPoints} onChange={(event) => setLoyaltyPoints(event.target.value)} />
               <Button variant="outline" disabled={busy || !selectedCustomerId || !loyaltyPoints} onClick={() => run(async () => {
-                await withToken((idToken) => addLoyaltyPointsAction({ idToken, customerId: selectedCustomerId, points: Number(loyaltyPoints) }));
+                await withToken((sessionProof) => addLoyaltyPointsAction({ sessionProof, customerId: selectedCustomerId, points: Number(loyaltyPoints) }));
                 setLoyaltyPoints('');
               }, 'Loyalty points added')}>Add points</Button>
             </div>
@@ -145,7 +145,7 @@ export function PosOperations() {
               <Input placeholder="Promo code (optional)" value={promoCode} onChange={(event) => setPromoCode(event.target.value)} />
             </div>
             <Button disabled={busy || !discountName || !discountValue} onClick={() => run(async () => {
-              await withToken((idToken) => createDiscountAction({ idToken, name: discountName, type: discountType, value: Number(discountValue), promoCode: promoCode || undefined }));
+              await withToken((sessionProof) => createDiscountAction({ sessionProof, name: discountName, type: discountType, value: Number(discountValue), promoCode: promoCode || undefined }));
               setDiscountName(''); setDiscountValue(''); setPromoCode('');
             }, 'Discount created')}>Create discount</Button>
             <Separator />
@@ -165,7 +165,7 @@ export function PosOperations() {
               {customers?.map((customer) => <option key={customer.id} value={customer.id}>{customer.name}</option>)}
             </select>
             <Button disabled={busy || !creditAmount} onClick={() => run(async () => {
-              await withToken((idToken) => createStoreCreditAction({ idToken, initialAmount: Number(creditAmount), customerId: creditCustomerId || undefined, type: 'store_credit' }));
+              await withToken((sessionProof) => createStoreCreditAction({ sessionProof, initialAmount: Number(creditAmount), customerId: creditCustomerId || undefined, type: 'store_credit' }));
               setCreditAmount(''); setCreditCustomerId('');
             }, 'Store credit issued')}>Issue store credit</Button>
             <Separator />
@@ -180,7 +180,7 @@ export function PosOperations() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div className="flex gap-2"><Input type="number" min="0" placeholder="Opening balance" value={openingBalance} onChange={(event) => setOpeningBalance(event.target.value)} /><Button disabled={busy || !openingBalance} onClick={() => run(async () => {
-              await withToken((idToken) => openCashDrawerAction({ idToken, openingBalance: Number(openingBalance) }));
+              await withToken((sessionProof) => openCashDrawerAction({ sessionProof, openingBalance: Number(openingBalance) }));
               setOpeningBalance('');
             }, 'Cash drawer opened')}>Open drawer</Button></div>
             <select className="flex h-10 w-full rounded-md border bg-background px-3 text-sm" value={closingDrawerId} onChange={(event) => setClosingDrawerId(event.target.value)}>
@@ -188,7 +188,7 @@ export function PosOperations() {
               {openDrawers.map((drawer) => <option key={drawer.id} value={drawer.id}>{drawer.salespersonName} - opened with {money(drawer.openingBalance)}</option>)}
             </select>
             <div className="flex gap-2"><Input type="number" min="0" placeholder="Closing balance" value={closingBalance} onChange={(event) => setClosingBalance(event.target.value)} /><Button variant="outline" disabled={busy || !closingDrawerId || !closingBalance} onClick={() => run(async () => {
-              await withToken((idToken) => closeCashDrawerAction({ idToken, drawerId: closingDrawerId, closingBalance: Number(closingBalance) }));
+              await withToken((sessionProof) => closeCashDrawerAction({ sessionProof, drawerId: closingDrawerId, closingBalance: Number(closingBalance) }));
               setClosingDrawerId(''); setClosingBalance('');
             }, 'Cash drawer closed')}>Close drawer</Button></div>
           </CardContent>
@@ -209,7 +209,7 @@ export function PosOperations() {
             </div>
             <Button disabled={busy || !layawayCustomerId || !layawayProductId || !layawayProductName || !layawayPrice} onClick={() => run(async () => {
               const customer = customers?.find((item) => item.id === layawayCustomerId);
-              await withToken((idToken) => createLayawayAction({ idToken, customerId: layawayCustomerId, customerName: customer?.name || '', items: [{ productId: layawayProductId, productName: layawayProductName, price: Number(layawayPrice), quantity: Number(layawayQuantity) }] }));
+              await withToken((sessionProof) => createLayawayAction({ sessionProof, customerId: layawayCustomerId, customerName: customer?.name || '', items: [{ productId: layawayProductId, productName: layawayProductName, price: Number(layawayPrice), quantity: Number(layawayQuantity) }] }));
               setLayawayProductId(''); setLayawayProductName(''); setLayawayPrice(''); setLayawayQuantity('1');
             }, 'Layaway created')}>Create layaway</Button>
             <Separator />
@@ -217,7 +217,7 @@ export function PosOperations() {
               <select className="flex h-10 w-full rounded-md border bg-background px-3 text-sm" value={paymentLayawayId} onChange={(event) => setPaymentLayawayId(event.target.value)}><option value="">Select pending layaway</option>{layaways?.filter((layaway) => layaway.status === 'pending').map((layaway) => <option key={layaway.id} value={layaway.id}>{layaway.customerName} - remaining {money(layaway.remainingAmount)}</option>)}</select>
               <Input type="number" min="0.01" placeholder="Payment" value={paymentAmount} onChange={(event) => setPaymentAmount(event.target.value)} />
               <Button variant="outline" disabled={busy || !paymentLayawayId || !paymentAmount || Number(paymentAmount) > (selectedLayaway?.remainingAmount || 0)} onClick={() => run(async () => {
-                await withToken((idToken) => makeLayawayPaymentAction({ idToken, layawayId: paymentLayawayId, paymentAmount: Number(paymentAmount) }));
+                await withToken((sessionProof) => makeLayawayPaymentAction({ sessionProof, layawayId: paymentLayawayId, paymentAmount: Number(paymentAmount) }));
                 setPaymentLayawayId(''); setPaymentAmount('');
               }, 'Layaway payment recorded')}>Record payment</Button>
             </div>

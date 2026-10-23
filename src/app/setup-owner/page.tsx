@@ -1,7 +1,7 @@
 'use client';
 
 import Image from 'next/image';
-import { useState } from 'react';
+import { Suspense, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { createShopOwnerAction } from '@/app/actions/shop-actions';
 import { Button } from '@/components/ui/button';
@@ -12,6 +12,14 @@ import { Loader2 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 
 export default function SetupOwnerPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center">Loading shop setup...</div>}>
+      <OwnerSetupForm />
+    </Suspense>
+  );
+}
+
+function OwnerSetupForm() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { toast } = useToast();
@@ -47,8 +55,8 @@ export default function SetupOwnerPage() {
             <form onSubmit={submit} className="space-y-4">
               <div className="grid grid-cols-2 gap-4"><div className="space-y-2"><Label htmlFor="owner-name">Name</Label><Input id="owner-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required /></div><div className="space-y-2"><Label htmlFor="owner-surname">Surname</Label><Input id="owner-surname" value={form.surname} onChange={(e) => setForm({ ...form, surname: e.target.value })} required /></div></div>
               <div className="space-y-2"><Label htmlFor="owner-email">Email</Label><Input id="owner-email" type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} required /></div>
-              <div className="space-y-2"><Label htmlFor="owner-password">Password</Label><Input id="owner-password" type="password" minLength={6} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required /></div>
-              <div className="space-y-2"><Label htmlFor="owner-confirm-password">Confirm password</Label><Input id="owner-confirm-password" type="password" minLength={6} value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} required /></div>
+              <div className="space-y-2"><Label htmlFor="owner-password">Password</Label><Input id="owner-password" type="password" minLength={10} value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required /></div>
+              <div className="space-y-2"><Label htmlFor="owner-confirm-password">Confirm password</Label><Input id="owner-confirm-password" type="password" minLength={10} value={form.confirmPassword} onChange={(e) => setForm({ ...form, confirmPassword: e.target.value })} required /></div>
               <Button type="submit" className="w-full" disabled={isSaving}>{isSaving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Create Owner Account</Button>
             </form>
           </CardContent>

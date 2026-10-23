@@ -23,9 +23,9 @@ import {
   ChartTooltipContent,
   type ChartConfig,
 } from '@/components/ui/chart';
-import { useCollection, useDoc, useFirestore, useUser } from '@/firebase';
-import { useMemoFirebase } from '@/firebase/provider';
-import { collectionGroup, doc, query, where } from 'firebase/firestore';
+import { useCollection, useDoc, useMysql, useUser } from '@/auth';
+import { useMemoMysql } from '@/auth/provider';
+import { collectionGroup, doc, query, where } from '@/lib/mysql-client';
 import type { UserProfile } from '@/lib/types';
 import type { SaleItem } from '@/lib/types';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -64,20 +64,20 @@ const getUniqueMonths = (items: SaleItem[] | null): string[] => {
 };
 
 export function SalesByProductChart() {
-  const firestore = useFirestore();
+  const mysql = useMysql();
   const { user } = useUser();
   const { selectedShopId, isSuperAdmin } = useSelectedShopContext();
-  const profileRef = useMemoFirebase(() => (firestore && user ? doc(firestore, 'users', user.uid) : null), [firestore, user]);
+  const profileRef = useMemoMysql(() => (mysql && user ? doc(mysql, 'users', user.uid) : null), [mysql, user]);
   const { data: profile } = useDoc<UserProfile>(profileRef);
   const scopedShopId = isSuperAdmin ? selectedShopId || profile?.shopId : profile?.shopId;
   const [selectedMonth, setSelectedMonth] = useState<string>('');
 
-  const saleItemsQuery = useMemoFirebase(
+  const saleItemsQuery = useMemoMysql(
     () => {
-      if (!firestore || !profile || !scopedShopId) return null;
-      return query(collectionGroup(firestore, 'items'), where('shopId', '==', scopedShopId));
+      if (!mysql || !profile || !scopedShopId) return null;
+      return query(collectionGroup(mysql, 'items'), where('shopId', '==', scopedShopId));
     },
-    [firestore, profile, scopedShopId]
+    [mysql, profile, scopedShopId]
   );
   const { data: saleItems, isLoading } = useCollection<SaleItem>(saleItemsQuery);
 

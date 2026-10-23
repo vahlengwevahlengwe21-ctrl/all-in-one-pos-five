@@ -13,7 +13,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
-import { useAuth } from '@/firebase';
+import { useAuth } from '@/auth';
 import { validateStoreCreditAction } from '@/app/actions/advanced-pos-actions';
 import { Loader2, Gift } from 'lucide-react';
 
@@ -50,9 +50,9 @@ export function StoreCreditRedeemer({
 
     setIsLoading(true);
     try {
-      const idToken = await auth.currentUser.getIdToken();
+      const sessionProof = await auth.currentUser.getSessionProof();
       const result = await validateStoreCreditAction({
-        idToken,
+        sessionProof,
         code: code.trim(),
         amount,
       });

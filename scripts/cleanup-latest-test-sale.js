@@ -1,23 +1,73 @@
-require('dotenv/config');
-const { cert, getApps, initializeApp } = require('firebase-admin/app');
-const { getFirestore } = require('firebase-admin/firestore');
-if (!getApps().length) initializeApp({ credential: cert({ projectId: process.env.FIREBASE_PROJECT_ID, clientEmail: process.env.FIREBASE_CLIENT_EMAIL, privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n') }) });
-const firestore = getFirestore();
-async function main() {
-  const candidates = await firestore.collection('sales').where('salespersonId', '==', 'AeYINQSx7DXWo0LUfUaXAbneZ0j1').get();
-  const sale = candidates.docs.sort((a,b) => b.data().createdAt.toMillis() - a.data().createdAt.toMillis())[0];
-  if (!sale) throw new Error('No Jeff sales found; nothing deleted.');
-  const data = sale.data();
-  if (data.total !== 485.99 || Date.now() - data.createdAt.toMillis() > 15 * 60 * 1000) throw new Error('Latest sale did not match the test transaction; nothing deleted.');
-  const batch = firestore.batch();
-  const items = await sale.ref.collection('items').get();
-  items.docs.forEach((doc) => batch.delete(doc.ref));
-  const returns = await sale.ref.collection('returns').get();
-  returns.docs.forEach((doc) => batch.delete(doc.ref));
-  const movements = await firestore.collection('inventory_transactions').where('referenceId', '==', sale.id).get();
-  movements.docs.forEach((doc) => batch.delete(doc.ref));
-  batch.delete(sale.ref);
-  await batch.commit();
-  console.log(`Deleted test sale ${sale.id}.`);
+const { createMysqlPool } = require('./mysql-support.cjs');
+
+const testSalespersonId = 'AeYINQSx7DXWo0LUfUaXAbneZ0j1';
+const expectedTotal = 485.99;
+const maximumAgeMs = 15 * 60 * 1000;
+
+function parsePayload(payload) {
+  return typeof payload === 'string' ? JSON.parse(payload) : payload;
 }
-main().catch((error) => { console.error(error.message); process.exitCode = 1; });
+
+function timestampMillis(value) {
+  if (typeof value === 'number') return value;
+  if (value?.__mysqlType === 'timestamp') return value.value;
+  if (typeof value === 'string') return Date.parse(value);
+  return NaN;
+}
+
+async function main() {
+  const pool = createMysqlPool();
+  try {
+    const [sales] = await pool.execute(
+      'SELECT path, doc_id, payload FROM app_records WHERE collection_path = ?',
+      ['sales'],
+    );
+    const candidates = sales
+      .map((row) => ({ ...row, data: parsePayload(row.payload) }))
+      .filter((row) => row.data.salespersonId === testSalespersonId)
+      .sort((first, second) => timestampMillis(second.data.createdAt) - timestampMillis(first.data.createdAt));
+    const sale = candidates[0];
+    if (!sale) throw new Error('No matching test sales were found; nothing was deleted.');
+    const createdAt = timestampMillis(sale.data.createdAt);
+    if (sale.data.total !== expectedTotal || !Number.isFinite(createdAt) || Date.now() - createdAt > maximumAgeMs) {
+      throw new Error('The latest matching sale did not match the expected test transaction; nothing was deleted.');
+    }
+
+    const saleId = sale.doc_id;
+    const childCollections = [`sales/${saleId}/items`, `sales/${saleId}/returns`];
+    const [children] = await pool.execute(
+      'SELECT path FROM app_records WHERE collection_path IN (?, ?)',
+      childCollections,
+    );
+    const [movements] = await pool.execute(
+      'SELECT path, payload FROM app_records WHERE collection_path = ?',
+      ['inventory_transactions'],
+    );
+    const movementPaths = movements
+      .filter((row) => parsePayload(row.payload).referenceId === saleId)
+      .map((row) => row.path);
+    const paths = [sale.path, ...children.map((row) => row.path), ...movementPaths];
+
+    const connection = await pool.getConnection();
+    try {
+      await connection.beginTransaction();
+      for (const path of paths) {
+        await connection.execute('DELETE FROM app_records WHERE path = ?', [path]);
+      }
+      await connection.commit();
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+    console.log(`Deleted matching MySQL test sale ${saleId} and its child records.`);
+  } finally {
+    await pool.end();
+  }
+}
+
+main().catch((error) => {
+  console.error(error.message);
+  process.exitCode = 1;
+});
