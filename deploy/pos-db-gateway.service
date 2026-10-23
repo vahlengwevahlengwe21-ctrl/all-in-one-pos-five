@@ -1,0 +1,25 @@
+[Unit]
+Description=All In One POS database gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=dbgateway
+Group=dbgateway
+WorkingDirectory=/opt/db-gateway/database-gateway
+Environment=DB_GATEWAY_ENV_FILE=/opt/db-gateway/pos-gateway-db.env
+Environment=POS_DB_GATEWAY_PORT=8788
+Environment=POS_DB_GATEWAY_HOST=0.0.0.0
+EnvironmentFile=/opt/db-gateway/pos-gateway.env
+ExecStart=/usr/bin/node /opt/db-gateway/database-gateway/pos-db-gateway.mjs
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/db-gateway
+
+[Install]
+WantedBy=multi-user.target

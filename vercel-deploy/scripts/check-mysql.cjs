@@ -5,6 +5,23 @@ dotenv.config({ path: '.env.local' });
 dotenv.config();
 
 async function main() {
+  if (process.env.DB_GATEWAY_URL) {
+    requiredEnv('DB_GATEWAY_TOKEN');
+    const url = new URL(process.env.DB_GATEWAY_URL);
+    if (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname)) {
+      throw new Error('DB_GATEWAY_URL must use HTTPS.');
+    }
+    const response = await fetch(`${url.toString().replace(/\/$/, '')}/healthz`, {
+      cache: 'no-store',
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!response.ok) {
+      throw new Error(`Database gateway health check failed (${response.status}).`);
+    }
+    console.log('Database gateway connection successful.');
+    return;
+  }
+
   const port = Number(process.env.DB_PORT || '3306');
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     throw new Error('DB_PORT must be a valid TCP port.');

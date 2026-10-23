@@ -1,13 +1,21 @@
 import 'server-only';
 
 import { randomUUID } from 'node:crypto';
-import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
+import type { RowDataPacket } from 'mysql2/promise';
 import { getMysqlPool } from '@/lib/mysql';
+import type { MysqlConnection } from '@/lib/mysql-gateway-client';
 
 type Operator = '==' | '!=' | '<' | '<=' | '>' | '>=' | 'in' | 'array-contains';
 type Filter = { field: string; operator: Operator; value: unknown };
 type Sort = { field: string; direction: 'asc' | 'desc' };
 type Marker = { __mysqlType: 'timestamp' | 'server-timestamp' | 'increment' | 'delete' | 'array-union'; value?: any };
+
+const selectPayloadSql = 'SELECT payload FROM app_records WHERE path = ?';
+const selectPayloadForUpdateSql = 'SELECT payload FROM app_records WHERE path = ? FOR UPDATE';
+const selectCollectionSql = 'SELECT path, payload FROM app_records WHERE collection_path = ?';
+const selectCollectionForUpdateSql = 'SELECT path, payload FROM app_records WHERE collection_path = ? FOR UPDATE';
+const selectCollectionGroupSql = 'SELECT path, payload FROM app_records WHERE collection_group = ?';
+const selectCollectionGroupForUpdateSql = 'SELECT path, payload FROM app_records WHERE collection_group = ? FOR UPDATE';
 
 export class Timestamp {
   private constructor(private readonly milliseconds: number) {}
@@ -168,7 +176,7 @@ export class Transaction {
     const snapshot = await readDocument(ref.path, this.connection, true);
     return snapshot;
   }
-  constructor(private readonly connection: PoolConnection) {}
+  constructor(private readonly connection: MysqlConnection) {}
   set(ref: DocumentReference, data: any, options?: { merge?: boolean }) { this.writes.push({ path: ref.path, type: 'set', data, merge: options?.merge }); return this; }
   create(ref: DocumentReference, data: any) { this.writes.push({ path: ref.path, type: 'create', data }); return this; }
   update(ref: DocumentReference, data: any) { this.writes.push({ path: ref.path, type: 'update', data }); return this; }
@@ -205,31 +213,31 @@ export class MysqlStore {
   }
 }
 
-async function selectDoc(path: string, executor: Pick<PoolConnection, 'execute'>, lock = false) {
+async function selectDoc(path: string, executor: Pick<MysqlConnection, 'execute'>, lock = false) {
   const payload = await selectRawDoc(path, executor, lock);
   return payload === undefined ? undefined : decode(payload);
 }
 
-async function selectRawDoc(path: string, executor: Pick<PoolConnection, 'execute'>, lock = false) {
+async function selectRawDoc(path: string, executor: Pick<MysqlConnection, 'execute'>, lock = false) {
   const [rows] = await executor.execute<(RowDataPacket & { payload: string | object })[]>(
-    `SELECT payload FROM app_records WHERE path = ?${lock ? ' FOR UPDATE' : ''}`, [path],
+    lock ? selectPayloadForUpdateSql : selectPayloadSql, [path],
   );
   if (!rows.length) return undefined;
   return typeof rows[0].payload === 'string' ? JSON.parse(rows[0].payload) : rows[0].payload;
 }
 
-async function readDocument(path: string, connection?: PoolConnection, lock = false): Promise<DocumentSnapshot> {
+async function readDocument(path: string, connection?: MysqlConnection, lock = false): Promise<DocumentSnapshot> {
   const ref = new DocumentReference(path);
   const payload = await selectRawDoc(path, connection ?? getMysqlPool(), lock);
   return new DocumentSnapshot(ref, payload);
 }
 
-async function readQuery(options: QueryOptions, connection?: PoolConnection, lock = false): Promise<QuerySnapshot> {
+async function readQuery(options: QueryOptions, connection?: MysqlConnection, lock = false): Promise<QuerySnapshot> {
   const executor = connection ?? getMysqlPool();
   const [rows] = await executor.execute<(RowDataPacket & { path: string; payload: string | object })[]>(
-    `${options.collectionGroup
-      ? 'SELECT path, payload FROM app_records WHERE collection_group = ?'
-      : 'SELECT path, payload FROM app_records WHERE collection_path = ?'}${lock ? ' FOR UPDATE' : ''}`,
+    options.collectionGroup
+      ? lock ? selectCollectionGroupForUpdateSql : selectCollectionGroupSql
+      : lock ? selectCollectionForUpdateSql : selectCollectionSql,
     [options.collectionGroup ?? options.collectionPath],
   );
   let docs = rows.map(row => {
@@ -249,7 +257,7 @@ async function readQuery(options: QueryOptions, connection?: PoolConnection, loc
   return new QuerySnapshot(docs.map(item => new DocumentSnapshot(new DocumentReference(item.path), item.payload)));
 }
 
-async function applyWrite(connection: PoolConnection, write: Write) {
+async function applyWrite(connection: MysqlConnection, write: Write) {
   const parts = pathParts(write.path, 'document');
   const collectionPath = parts.slice(0, -1).join('/');
   const docId = parts[parts.length - 1];

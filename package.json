@@ -7,6 +7,7 @@
     "create:super-admin": "node scripts/create-super-admin.js",
     "migrate:shop-data": "node scripts/migrate-shop-data.js",
     "db:check": "node scripts/check-mysql.cjs",
+    "db:gateway-allowlist": "node scripts/generate-db-gateway-allowlist.cjs",
     "build": "next build",
     "start": "next start",
     "electron:dev": "electron electron/main.cjs",

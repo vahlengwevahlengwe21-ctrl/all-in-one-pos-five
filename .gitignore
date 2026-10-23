@@ -15,7 +15,8 @@
 /out-builder/
 
 # production
-/build
+/build/*
+!/build/icon.ico
 
 # misc
 .DS_Store
@@ -53,3 +54,7 @@ next-env.d.ts
 
 .vercel
 .env*
+
+!.env.example
+!.env.gateway.example
+!/vercel-deploy/.env.example

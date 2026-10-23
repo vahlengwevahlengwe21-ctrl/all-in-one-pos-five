@@ -1,9 +1,10 @@
 import 'server-only';
 
-import { createPool, type Pool } from 'mysql2/promise';
+import { createPool } from 'mysql2/promise';
+import { createGatewayPool, type MysqlPool } from '@/lib/mysql-gateway-client';
 
 const globalForMysql = globalThis as typeof globalThis & {
-  mysqlPool?: Pool;
+  mysqlPool?: MysqlPool;
 };
 
 function requiredEnv(name: string): string {
@@ -14,8 +15,17 @@ function requiredEnv(name: string): string {
   return value;
 }
 
-export function getMysqlPool(): Pool {
+export function getMysqlPool() {
   if (!globalForMysql.mysqlPool) {
+    const gatewayUrl = process.env.DB_GATEWAY_URL;
+    if (gatewayUrl) {
+      globalForMysql.mysqlPool = createGatewayPool(
+        gatewayUrl,
+        requiredEnv('DB_GATEWAY_TOKEN'),
+      );
+      return globalForMysql.mysqlPool;
+    }
+
     const port = Number(process.env.DB_PORT ?? '3306');
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
       throw new Error('DB_PORT must be a valid TCP port.');
@@ -23,7 +33,7 @@ export function getMysqlPool(): Pool {
 
     const ca = process.env.DB_SSL_CA?.replace(/\\n/g, '\n');
 
-    globalForMysql.mysqlPool = createPool({
+    const pool = createPool({
       host: requiredEnv('DB_HOST'),
       port,
       user: requiredEnv('DB_USER'),
@@ -36,6 +46,7 @@ export function getMysqlPool(): Pool {
         ? undefined
         : { rejectUnauthorized: true, ...(ca ? { ca } : {}) },
     });
+    globalForMysql.mysqlPool = pool;
   }
 
   return globalForMysql.mysqlPool;
