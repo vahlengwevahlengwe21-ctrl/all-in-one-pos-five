@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 const backendOrigin = 'https://pos.allinonesolution.uk';
+const backendHost = new URL(backendOrigin).host;
 
 export function middleware(request: NextRequest) {
   if (process.env.VERCEL_ENV !== 'production') return NextResponse.next();
@@ -21,7 +22,10 @@ export function middleware(request: NextRequest) {
     backendOrigin,
   );
   const headers = new Headers(request.headers);
-  if (origin) headers.set('origin', backendOrigin);
+  if (origin) {
+    headers.set('origin', backendOrigin);
+    headers.set('x-forwarded-host', backendHost);
+  }
 
   return NextResponse.rewrite(destination, { request: { headers } });
 }
